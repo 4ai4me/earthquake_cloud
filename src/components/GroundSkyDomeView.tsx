@@ -58,12 +58,47 @@ export function GroundSkyDomeView({
 
   // Observer presets
   const presets = [
+    { label: '대한민국 수원 상공 (37.26°N)', angle: 37.26 },
     { label: '북반구 단층대 상공 (45°)', angle: 45 },
     { label: '지자기 북극 상공 (90°)', angle: 90 },
     { label: '태양풍 주간면 적도 (0°)', angle: 0 },
     { label: '남반구 고위도 (270°)', angle: 270 },
     { label: '야간면 자기권미 (180°)', angle: 180 },
   ];
+
+  // Native non-passive wheel event listener to prevent outer page scroll and isolate FOV zoom
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const onWheelNative = (e: WheelEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const delta = e.deltaY < 0 ? -4 : 4;
+      setCloudConfig((prev) => {
+        const currentFov = prev.groundObserver?.fovDeg ?? 140;
+        const nextFov = Math.max(80, Math.min(170, currentFov + delta));
+        return {
+          ...prev,
+          groundObserver: {
+            ...(prev.groundObserver || {
+              angleDeg: observerAngle,
+              label: '현재 지점',
+              altitudeKm: 8.0,
+              fovDeg: 140,
+              azimuthOffsetDeg: 0,
+            }),
+            fovDeg: nextFov,
+          },
+        };
+      });
+    };
+
+    canvas.addEventListener('wheel', onWheelNative, { passive: false });
+    return () => {
+      canvas.removeEventListener('wheel', onWheelNative);
+    };
+  }, [observerAngle, setCloudConfig]);
 
   useEffect(() => {
     let lastTime = performance.now();
@@ -286,8 +321,32 @@ export function GroundSkyDomeView({
 
     animFrameRef.current = requestAnimationFrame(render);
 
+    const canvas = canvasRef.current;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setCloudConfig((prev) => {
+        const currentFov = prev.groundObserver?.fovDeg ?? 140;
+        const nextFov = Math.max(60, Math.min(180, currentFov + (e.deltaY < 0 ? -5 : 5)));
+        return {
+          ...prev,
+          groundObserver: {
+            angleDeg: prev.groundObserver?.angleDeg ?? 45,
+            fovDeg: nextFov,
+          },
+        };
+      });
+    };
+
+    if (canvas) {
+      canvas.addEventListener('wheel', onWheel, { passive: false });
+    }
+
     return () => {
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+      if (canvas) {
+        canvas.removeEventListener('wheel', onWheel);
+      }
     };
   }, [
     earthConfig,
@@ -352,6 +411,32 @@ export function GroundSkyDomeView({
           height={480}
           className="w-full h-full max-h-[500px] object-contain rounded-md shadow-2xl"
         />
+
+        {/* Top-Right Meteorological Status Badge */}
+        {cloudConfig.weatherData && (
+          <div className="absolute top-4 right-4 p-2 bg-[#0c0c14]/90 backdrop-blur-md rounded-lg border border-[#222232] text-[10px] font-mono text-slate-300 shadow-xl flex flex-col gap-1 pointer-events-none">
+            <div className="flex items-center gap-1.5 text-cyan-300 font-bold border-b border-[#1e1e28] pb-1">
+              <Compass className="w-3.5 h-3.5 text-cyan-400" />
+              <span>{cloudConfig.weatherData.stationName}</span>
+            </div>
+            <div className="flex justify-between gap-3">
+              <span className="text-slate-500">대기 풍속 (u, v):</span>
+              <strong className="text-cyan-300">({cloudConfig.weatherData.windU}, {cloudConfig.weatherData.windV}) m/s</strong>
+            </div>
+            <div className="flex justify-between gap-3">
+              <span className="text-slate-500">풍속 / 풍향:</span>
+              <strong className="text-slate-200">{cloudConfig.weatherData.windSpeed} m/s ({cloudConfig.weatherData.windDirectionDeg}°)</strong>
+            </div>
+            <div className="flex justify-between gap-3">
+              <span className="text-slate-500">기압 / 상대습도:</span>
+              <strong className="text-amber-300">{cloudConfig.weatherData.pressureHpa} hPa / {cloudConfig.weatherData.relativeHumidity}%</strong>
+            </div>
+            <div className="flex justify-between gap-3">
+              <span className="text-slate-500">지자기 Kp / Dst:</span>
+              <strong className="text-rose-400">Kp {cloudConfig.weatherData.kpIndex.toFixed(1)} / {cloudConfig.weatherData.dstIndexNt} nT</strong>
+            </div>
+          </div>
+        )}
 
         {/* Floating Quick Controls Overlay */}
         <div className="absolute bottom-3 left-3 right-3 p-2 bg-[#0c0c12]/90 backdrop-blur-md rounded-lg border border-[#242432] flex flex-wrap items-center justify-between gap-3 text-xs">

@@ -1,4 +1,4 @@
-import { EarthDipoleConfig, ExternalMagneticSource, SolarWindConfig } from '../types';
+import { EarthDipoleConfig, ExternalMagneticSource, MoonConfig, SolarWindConfig } from '../types';
 
 export const EPSILON = 0.05; // Regularizer to prevent division by zero at singularities
 
@@ -20,7 +20,7 @@ export function calculateEarthDipoleField(
   // If tilt angle is 0, use direct standard formula
   if (Math.abs(config.tiltAngle) < 0.01) {
     const bx = (3 * effectiveMoment * dx * dy) / r5;
-    const by = (effectiveMoment * (2 * dy * dy - dx * dx)) / r5;
+    const by = (effectiveMoment * (2 * dy * dy - dx * mechanicalMoment(effectiveMoment, dx, dy))) / r5;
     return { bx, by };
   }
 
@@ -42,8 +42,12 @@ export function calculateEarthDipoleField(
   return { bx, by };
 }
 
+function mechanicalMoment(m: number, dx: number, dy: number): number {
+  return dx * dx;
+}
+
 /**
- * Calculates External Magnetic Source Field (Monopole or Dipole) at point (x, y)
+ * Calculates External Magnetic Source Field (Monopole, Dipole, or Approaching Comet) at point (x, y)
  */
 export function calculateExternalSourceField(
   x: number,
@@ -82,6 +86,37 @@ export function calculateExternalSourceField(
       bx: bxPrime * cosA - byPrime * sinA,
       by: bxPrime * sinA + byPrime * cosA,
     };
+  } else if (source.type === 'comet') {
+    // Approaching Comet with Induced Plasma Magnetosphere & Draped Ion Tail
+    // Comet nucleus at (source.x, source.y)
+    // Coma diamagnetic shielding + Bow Shock + Ion tail draping along anti-solar direction (+X)
+    const tailLen = source.cometTailLength || 3.0;
+    const gasActivity = source.cometGasActivity || source.strength || 2.5;
+
+    // 1. Coma Diamagnetic Cavity & Outgassing Field
+    const r3 = Math.pow(r, 3);
+    let cbx = -(gasActivity * 0.35 * dx) / r3;
+    let cby = -(gasActivity * 0.35 * dy) / r3;
+
+    // 2. Draped Ion Tail along anti-solar (+X) direction from comet head
+    if (dx > 0 && dx < tailLen) {
+      const tailWidth = 0.35 + dx * 0.18;
+      const tailEnvelope = Math.exp(-(dy * dy) / (2 * tailWidth * tailWidth)) * Math.exp(-dx / tailLen);
+      // Draped lobes: top lobe (dy > 0) has field pointing towards nucleus (-X), bottom lobe (+X)
+      const tailLobeBx = (dy > 0 ? -1 : 1) * gasActivity * 0.75 * tailEnvelope;
+      const tailLobeBy = (dy / tailWidth) * gasActivity * 0.25 * tailEnvelope;
+      cbx += tailLobeBx;
+      cby += tailLobeBy;
+    }
+
+    // 3. Upstream Cometary Bow Shock (dx < 0)
+    if (dx < 0 && dx > -0.8 && Math.abs(dy) < 1.2) {
+      const shockStrength = gasActivity * 0.5 * Math.exp(-Math.hypot(dx, dy) / 0.6);
+      cbx += shockStrength * 0.5;
+      cby += shockStrength * (dy > 0 ? 0.3 : -0.3);
+    }
+
+    return { bx: cbx, by: cby };
   }
 
   return { bx: 0, by: 0 };
@@ -118,6 +153,60 @@ export function calculateSolarWindField(
 }
 
 /**
+ * Calculates the Moon's Local Crustal Magnetic Field & Downstream Plasma Wake Cavity
+ */
+export function calculateMoonField(
+  x: number,
+  y: number,
+  moonConfig: MoonConfig,
+  solarWind: SolarWindConfig,
+  earthConfig: EarthDipoleConfig
+): { bx: number; by: number; moonX: number; moonY: number; distToMoon: number } {
+  if (!moonConfig || !moonConfig.enabled) {
+    return { bx: 0, by: 0, moonX: 0, moonY: 0, distToMoon: 999 };
+  }
+
+  const rad = (moonConfig.phaseAngleDeg * Math.PI) / 180;
+  const moonX = earthConfig.x + moonConfig.orbitRadius * Math.cos(rad);
+  const moonY = earthConfig.y + moonConfig.orbitRadius * Math.sin(rad);
+
+  const dx = x - moonX;
+  const dy = y - moonY;
+  const rSquared = dx * dx + dy * dy;
+  const r = Math.sqrt(rSquared) + EPSILON;
+  const r5 = Math.pow(r, 5);
+
+  // 1. Lunar Remanent Crustal Dipole (Reiner Gamma-like swirl dipole)
+  const angleRad = ((moonConfig.remanentAngle || 0) * Math.PI) / 180;
+  const cosA = Math.cos(angleRad);
+  const sinA = Math.sin(angleRad);
+
+  const xPrime = dx * cosA + dy * sinA;
+  const yPrime = -dx * sinA + dy * cosA;
+
+  const bxPrime = (3 * moonConfig.remanentMoment * xPrime * yPrime) / r5;
+  const byPrime = (moonConfig.remanentMoment * (2 * yPrime * yPrime - xPrime * xPrime)) / r5;
+
+  let bx = bxPrime * cosA - byPrime * sinA;
+  let by = bxPrime * sinA + byPrime * cosA;
+
+  // 2. Lunar Plasma Wake (Diamagnetic Cavity in Solar Wind)
+  // When in solar wind (or tail), Moon absorbs ions creating density depletion downstream (+X direction)
+  if (solarWind.enabled && dx > 0 && dx < 2.2) {
+    const wakeWidth = moonConfig.radius * 1.6 + dx * 0.15;
+    if (Math.abs(dy) < wakeWidth) {
+      const wakeDepth = Math.exp(-(dy * dy) / (2 * wakeWidth * wakeWidth)) * Math.exp(-dx / 1.8);
+      const wakeCavityBx = -solarWind.imfBx * 0.12 * wakeDepth * (moonConfig.wakeCavityStrength || 0.7);
+      const wakeCavityBy = (dy > 0 ? 0.08 : -0.08) * wakeDepth * (moonConfig.wakeCavityStrength || 0.7);
+      bx += wakeCavityBx;
+      by += wakeCavityBy;
+    }
+  }
+
+  return { bx, by, moonX, moonY, distToMoon: r };
+}
+
+/**
  * Computes Composite Magnetic Vector Field (Superposition Principle)
  */
 export function computeTotalMagneticField(
@@ -125,7 +214,8 @@ export function computeTotalMagneticField(
   y: number,
   earthConfig: EarthDipoleConfig,
   sources: ExternalMagneticSource[],
-  solarWind: SolarWindConfig
+  solarWind: SolarWindConfig,
+  moonConfig?: MoonConfig
 ): { bx: number; by: number; magnitude: number } {
   // 1. Earth Dipole
   const earthField = calculateEarthDipoleField(x, y, earthConfig);
@@ -146,6 +236,13 @@ export function computeTotalMagneticField(
   bx += swField.bx;
   by += swField.by;
 
+  // 4. Moon Crustal Magnetic Field & Plasma Wake
+  if (moonConfig && moonConfig.enabled) {
+    const mField = calculateMoonField(x, y, moonConfig, solarWind, earthConfig);
+    bx += mField.bx;
+    by += mField.by;
+  }
+
   const magnitude = Math.sqrt(bx * bx + by * by);
 
   return { bx, by, magnitude };
@@ -160,12 +257,13 @@ export function computeFieldGradient(
   earthConfig: EarthDipoleConfig,
   sources: ExternalMagneticSource[],
   solarWind: SolarWindConfig,
+  moonConfig?: MoonConfig,
   h: number = 0.05
 ): { gradX: number; gradY: number; gradMag: number } {
-  const fXPlus = computeTotalMagneticField(x + h, y, earthConfig, sources, solarWind).magnitude;
-  const fXMinus = computeTotalMagneticField(x - h, y, earthConfig, sources, solarWind).magnitude;
-  const fYPlus = computeTotalMagneticField(x, y + h, earthConfig, sources, solarWind).magnitude;
-  const fYMinus = computeTotalMagneticField(x, y - h, earthConfig, sources, solarWind).magnitude;
+  const fXPlus = computeTotalMagneticField(x + h, y, earthConfig, sources, solarWind, moonConfig).magnitude;
+  const fXMinus = computeTotalMagneticField(x - h, y, earthConfig, sources, solarWind, moonConfig).magnitude;
+  const fYPlus = computeTotalMagneticField(x, y + h, earthConfig, sources, solarWind, moonConfig).magnitude;
+  const fYMinus = computeTotalMagneticField(x, y - h, earthConfig, sources, solarWind, moonConfig).magnitude;
 
   const gradX = (fXPlus - fXMinus) / (2 * h);
   const gradY = (fYPlus - fYMinus) / (2 * h);
@@ -186,14 +284,15 @@ export function traceStreamlineRK4(
   direction: 1 | -1 = 1,
   maxSteps: number = 180,
   stepSize: number = 0.05,
-  bounds: { minX: number; maxX: number; minY: number; maxY: number } = { minX: -6, maxX: 6, minY: -4, maxY: 4 }
+  bounds: { minX: number; maxX: number; minY: number; maxY: number } = { minX: -6, maxX: 6, minY: -4, maxY: 4 },
+  moonConfig?: MoonConfig
 ): Array<{ x: number; y: number; bMag: number }> {
   const points: Array<{ x: number; y: number; bMag: number }> = [];
   let currX = startX;
   let currY = startY;
 
   for (let i = 0; i < maxSteps; i++) {
-    const f0 = computeTotalMagneticField(currX, currY, earthConfig, sources, solarWind);
+    const f0 = computeTotalMagneticField(currX, currY, earthConfig, sources, solarWind, moonConfig);
     if (f0.magnitude < 1e-4) break;
 
     points.push({ x: currX, y: currY, bMag: f0.magnitude });
@@ -222,19 +321,19 @@ export function traceStreamlineRK4(
     const k1y = (f0.by / f0.magnitude) * h;
 
     // k2
-    const f1 = computeTotalMagneticField(currX + 0.5 * k1x, currY + 0.5 * k1y, earthConfig, sources, solarWind);
+    const f1 = computeTotalMagneticField(currX + 0.5 * k1x, currY + 0.5 * k1y, earthConfig, sources, solarWind, moonConfig);
     if (f1.magnitude < 1e-4) break;
     const k2x = (f1.bx / f1.magnitude) * h;
     const k2y = (f1.by / f1.magnitude) * h;
 
     // k3
-    const f2 = computeTotalMagneticField(currX + 0.5 * k2x, currY + 0.5 * k2y, earthConfig, sources, solarWind);
+    const f2 = computeTotalMagneticField(currX + 0.5 * k2x, currY + 0.5 * k2y, earthConfig, sources, solarWind, moonConfig);
     if (f2.magnitude < 1e-4) break;
     const k3x = (f2.bx / f2.magnitude) * h;
     const k3y = (f2.by / f2.magnitude) * h;
 
     // k4
-    const f3 = computeTotalMagneticField(currX + k3x, currY + k3y, earthConfig, sources, solarWind);
+    const f3 = computeTotalMagneticField(currX + k3x, currY + k3y, earthConfig, sources, solarWind, moonConfig);
     if (f3.magnitude < 1e-4) break;
     const k4x = (f3.bx / f3.magnitude) * h;
     const k4y = (f3.by / f3.magnitude) * h;
@@ -256,30 +355,41 @@ export function findNeutralPoints(
   gridStep: number = 0.35,
   bounds: { minX: number; maxX: number; minY: number; maxY: number } = { minX: -4.5, maxX: 4.5, minY: -3.5, maxY: 3.5 }
 ): Array<{ x: number; y: number; magnitude: number }> {
-  const neutralPoints: Array<{ x: number; y: number; magnitude: number }> = [];
+  const candidates: Array<{ x: number; y: number; magnitude: number }> = [];
 
   for (let x = bounds.minX; x <= bounds.maxX; x += gridStep) {
     for (let y = bounds.minY; y <= bounds.maxY; y += gridStep) {
       const distToEarth = Math.hypot(x - earthConfig.x, y - earthConfig.y);
-      if (distToEarth < earthConfig.radius) continue;
+      if (distToEarth < earthConfig.radius * 1.05) continue;
 
       const field = computeTotalMagneticField(x, y, earthConfig, sources, solarWind);
-      if (field.magnitude < 0.12) {
-        // Check if local minimum
-        const neighbors = [
-          computeTotalMagneticField(x + 0.1, y, earthConfig, sources, solarWind).magnitude,
-          computeTotalMagneticField(x - 0.1, y, earthConfig, sources, solarWind).magnitude,
-          computeTotalMagneticField(x, y + 0.1, earthConfig, sources, solarWind).magnitude,
-          computeTotalMagneticField(x, y - 0.1, earthConfig, sources, solarWind).magnitude,
-        ];
-        if (field.magnitude <= Math.min(...neighbors) + 0.05) {
-          neutralPoints.push({ x, y, magnitude: field.magnitude });
+      if (field.magnitude < 0.09) {
+        // Check if strictly smaller than all 4 neighbors
+        const delta = 0.12;
+        const n1 = computeTotalMagneticField(x + delta, y, earthConfig, sources, solarWind).magnitude;
+        const n2 = computeTotalMagneticField(x - delta, y, earthConfig, sources, solarWind).magnitude;
+        const n3 = computeTotalMagneticField(x, y + delta, earthConfig, sources, solarWind).magnitude;
+        const n4 = computeTotalMagneticField(x, y - delta, earthConfig, sources, solarWind).magnitude;
+        
+        if (field.magnitude <= n1 && field.magnitude <= n2 && field.magnitude <= n3 && field.magnitude <= n4) {
+          candidates.push({ x, y, magnitude: field.magnitude });
         }
       }
     }
   }
 
-  return neutralPoints;
+  // Cluster nearby candidates (Non-Maximum Suppression with minimum separation 0.75 R_E)
+  const filtered: Array<{ x: number; y: number; magnitude: number }> = [];
+  candidates.sort((a, b) => a.magnitude - b.magnitude);
+
+  for (const cand of candidates) {
+    const isTooClose = filtered.some((p) => Math.hypot(p.x - cand.x, p.y - cand.y) < 0.75);
+    if (!isTooClose) {
+      filtered.push(cand);
+    }
+  }
+
+  return filtered;
 }
 
 /**
@@ -353,8 +463,12 @@ export function computeHotspotMask(
 }
 
 /**
- * ③ 자기력선 수직 방향의 정렬 파동 (Sheep/Wave Cloud Pattern / 양떼구름):
+ * ③ 자기력선 수직 방향의 정렬 파동 (Sheep/Wave Cloud Pattern / 양떼구름·지진운):
  * C(x, y) = M(x, y) * [(1 + cos(k_perp · r - omega*t)) / 2]
+ * 
+ * 조건화: 외부 자극원(외부 자기원, 태양풍 이상 폭풍 등)의 총 자극 강도가 
+ * 임계치(externalStimulusThreshold, 기본값 0.5) 이상일 때만 지진운 파동이 발현됩니다.
+ * 평상시에는 억제되고 세계 기상 데이터 기반의 자연 대기 구름이 표시됩니다.
  */
 export function computeWaveCloudDensity(
   x: number,
@@ -367,12 +481,15 @@ export function computeWaveCloudDensity(
     sigmoidSteepness?: number;
     waveWavelength?: number;
     gradientWeight?: number;
+    externalStimulusThreshold?: number;
   },
   time: number = 0
 ): {
   density: number; // C(x, y) in [0, 1]
   mask: number; // M(x, y) in [0, 1]
   intensity: number; // I(x, y)
+  stimulusLevel: number; // S_ext
+  isStimulated: boolean;
   bTotal: number;
   bx: number;
   by: number;
@@ -384,17 +501,38 @@ export function computeWaveCloudDensity(
   const threshold = cloudConfig.interferenceThreshold ?? 0.35;
   const steepness = cloudConfig.sigmoidSteepness ?? 10.0;
   const wavelength = Math.max(0.05, cloudConfig.waveWavelength ?? 0.3);
+  const minStimulus = cloudConfig.externalStimulusThreshold ?? 0.5;
 
   // Compute field & interference
   const field = computeTotalMagneticField(x, y, earthConfig, sources, solarWind);
   const interf = computeInterferenceIntensity(x, y, earthConfig, sources, solarWind, alpha);
-  const mask = computeHotspotMask(interf.intensity, threshold, steepness);
+
+  // Calculate external stimulus level (sources + external field + space weather perturbations)
+  const activeSources = sources.filter((s) => s.active && Math.abs(s.strength) > 0.001);
+  const totalSourceStrength = activeSources.reduce((sum, s) => sum + Math.abs(s.strength), 0);
+  const extFieldMag = Math.hypot(interf.extField.bx, interf.extField.by);
+  const swStormPerturb = solarWind.enabled
+    ? Math.max(0, solarWind.pressure - 1.2) * 0.5 + Math.max(0, Math.abs(solarWind.imfBz) - 2.0) * 0.25
+    : 0;
+
+  const stimulusLevel = totalSourceStrength * 0.75 + extFieldMag * 1.6 + swStormPerturb;
+  const isStimulated = stimulusLevel >= minStimulus;
+
+  let mask = computeHotspotMask(interf.intensity, threshold, steepness);
+
+  // If external stimulus is below threshold, suppress the seismic wave cloud mask
+  if (stimulusLevel < minStimulus) {
+    const attenuation = Math.max(0, Math.min(1, stimulusLevel / Math.max(0.01, minStimulus)));
+    mask *= Math.pow(attenuation, 3.5); // Steep cutoff to 0
+  }
 
   if (field.magnitude < 1e-4) {
     return {
       density: 0,
       mask,
       intensity: interf.intensity,
+      stimulusLevel,
+      isStimulated,
       bTotal: 0,
       bx: 0,
       by: 0,
@@ -431,6 +569,8 @@ export function computeWaveCloudDensity(
     density,
     mask,
     intensity: interf.intensity,
+    stimulusLevel,
+    isStimulated,
     bTotal: field.magnitude,
     bx: field.bx,
     by: field.by,
@@ -438,6 +578,42 @@ export function computeWaveCloudDensity(
     kPerpY,
     wavePhase,
   };
+}
+
+/**
+ * 평상시 세계 기상 데이터 기반 자연 대기 구름 밀도 (Natural Meteorological Cloud Density):
+ * - 운량 (Cloud Cover %), 상대습도 (Relative Humidity %), 기압 (hPa), 온도 (°C)
+ * - 풍향 및 풍속 (u, v) 벡터에 따른 유기적 대기 이류 노이즈 패턴
+ */
+export function computeNaturalWeatherCloudDensity(
+  x: number,
+  y: number,
+  weatherData?: any,
+  time: number = 0
+): number {
+  if (!weatherData) return 0.35;
+
+  const cloudCover = Math.max(0, Math.min(100, weatherData.cloudCoverPercent ?? 50)) / 100;
+  const humidity = Math.max(10, Math.min(100, weatherData.relativeHumidity ?? 60)) / 100;
+  const windU = (weatherData.windU ?? 5) * 0.05;
+  const windV = (weatherData.windV ?? -2) * 0.05;
+
+  // Wind-advected atmospheric frame
+  const advX = x - windU * time * 0.04;
+  const advY = y - windV * time * 0.04;
+
+  // Multi-frequency harmonic atmospheric density field
+  const n1 = Math.sin(advX * 1.1 + advY * 0.7) * Math.cos(advX * 0.5 - advY * 1.3);
+  const n2 = Math.sin(advX * 2.6 - advY * 1.8 + 0.8) * 0.45;
+  const n3 = Math.cos(advX * 4.8 + advY * 3.9 + 1.9) * 0.25;
+  const rawHarmonic = (n1 + n2 + n3 + 1.7) / 3.4; // 0 to 1
+
+  // Pressure factor: low pressure storms increase cloud thickness
+  const pressure = weatherData.pressureHpa ?? 1013;
+  const pressureFactor = Math.max(0.7, Math.min(1.4, 1.0 + (1020 - pressure) / 40));
+
+  const naturalDensity = Math.max(0, Math.min(1, rawHarmonic * cloudCover * (0.35 + humidity * 0.65) * pressureFactor));
+  return naturalDensity;
 }
 
 /**

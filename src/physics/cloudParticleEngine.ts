@@ -151,6 +151,14 @@ export class CloudParticleSystem {
         p.vx = p.vx * (1 - config.viscosity) + forceX * config.viscosity;
         p.vy = p.vy * (1 - config.viscosity) + forceY * config.viscosity;
 
+        // Apply meteorological wind advection drift (NOAA GFS / ECMWF / DWD wind vector u, v)
+        if (config.weatherData) {
+          const windVx = (config.weatherData.windU || 0) * 0.0003;
+          const windVy = (config.weatherData.windV || 0) * 0.0003;
+          p.vx += windVx;
+          p.vy += windVy;
+        }
+
         // Wave cloud orthogonal grouping (pushing towards wave crests)
         if (config.showWaveClouds && waveData.mask > 0.1) {
           const waveForce = Math.sin(waveData.wavePhase) * 0.008 * waveData.mask;

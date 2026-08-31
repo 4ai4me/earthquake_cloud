@@ -4,22 +4,25 @@ import {
   EarthDipoleConfig,
   EarthquakeEvent,
   ExternalMagneticSource,
+  GlobalWeatherData,
   HeatmapMetric,
+  LayerVisibilityConfig,
+  MoonConfig,
   RenderMode,
   SolarWindConfig,
 } from './types';
 import { CloudParticleSystem } from './physics/cloudParticleEngine';
 import { CrustalStressManager } from './physics/crustalStressEngine';
+import { GLOBAL_WEATHER_PRESETS } from './physics/weatherEngine';
 import { SimulationCanvas2D } from './components/SimulationCanvas2D';
+import { DEFAULT_LAYER_VISIBILITY } from './components/VisualElementsGuidePanel';
 import { Magnetosphere3DView } from './components/Magnetosphere3DView';
 import { PhysicsControls } from './components/PhysicsControls';
-import { GeminiExpertAssistant } from './components/GeminiExpertAssistant';
 import { MathFormulaCard } from './components/MathFormulaCard';
 import { NumericalVerificationModal } from './components/NumericalVerificationModal';
 import {
   Activity,
   AlertOctagon,
-  Bot,
   Box,
   Code,
   Compass,
@@ -28,76 +31,106 @@ import {
   Globe,
   Layers,
   Maximize2,
+  Moon,
   Radio,
+  RotateCcw,
   Sliders,
   Sparkles,
   Sun,
+  Wind,
   Zap,
 } from 'lucide-react';
 
+const DEFAULT_EARTH_CONFIG: EarthDipoleConfig = {
+  x: 0,
+  y: 0,
+  moment: 2.2,
+  tiltAngle: 11,
+  radius: 0.95,
+  reversed: false,
+};
+
+const DEFAULT_SOLAR_WIND: SolarWindConfig = {
+  enabled: false, // 외부 자극 없는 상태
+  pressure: 1.0,
+  imfBx: 0.0,
+  imfBz: 0.0,
+  speed: 1.0,
+  density: 1.0,
+};
+
+const DEFAULT_MOON_CONFIG: MoonConfig = {
+  enabled: true,
+  orbitRadius: 3.5,
+  orbitPeriodDays: 27.32,
+  phaseAngleDeg: 45,
+  radius: 0.26,
+  remanentMoment: 0.15,
+  remanentAngle: 15,
+  tidalStressWeight: 0.25,
+  wakeCavityStrength: 0.7,
+  showOrbit: true,
+  showTidalBulge: true,
+  autoOrbit: true,
+  orbitSpeed: 0.3,
+};
+
+const DEFAULT_CLOUD_CONFIG: AtmosphericCloudConfig = {
+  enabled: true,
+  particleCount: 500,
+  polarizationSusceptibility: 1.2,
+  chargeRatio: 0.6,
+  condensationThreshold: 0.8,
+  showParticles: true,
+  showCloudBands: true,
+  showWaveClouds: true,
+  externalStimulusThreshold: 0.5,
+  interferenceThreshold: 0.85,
+  sigmoidSteepness: 6.0,
+  waveWavelength: 0.8,
+  gradientWeight: 0.5,
+  cloudOpacity: 0.85,
+  viscosity: 0.08,
+  perspectiveMode: 'space_global',
+  inspectionMode: 'none',
+  gamma: 0.6,
+  colorPalette: 'satellite_bone',
+  weatherData: GLOBAL_WEATHER_PRESETS[0].data,
+  useLiveWeather: false,
+};
+
 export default function App() {
-  // 1. Earth Dipole Configuration
-  const [earthConfig, setEarthConfig] = useState<EarthDipoleConfig>({
-    x: 0,
-    y: 0,
-    moment: 2.2,
-    tiltAngle: 11,
-    radius: 0.95,
-    reversed: false,
-  });
+  // 1. Global Meteorological Data State (NOAA GFS / ECMWF IFS / DWD ICON)
+  const [weatherData, setWeatherData] = useState<GlobalWeatherData>(GLOBAL_WEATHER_PRESETS[0].data);
 
-  // 2. External Magnetic Sources (Monopoles & Dipoles)
-  const [sources, setSources] = useState<ExternalMagneticSource[]>([
-    {
-      id: 'source-1',
-      name: '접근하는 외부 N극',
-      type: 'monopole_n',
-      x: 2.6,
-      y: 0.8,
-      strength: 2.5,
-      active: true,
-      orbiting: false,
-      orbitRadius: 2.6,
-      orbitSpeed: 0.5,
-      orbitPhase: 0.3,
-    },
-  ]);
+  // 2. Earth Dipole Configuration
+  const [earthConfig, setEarthConfig] = useState<EarthDipoleConfig>({ ...DEFAULT_EARTH_CONFIG });
 
-  // 3. Solar Wind & IMF Configuration
-  const [solarWind, setSolarWind] = useState<SolarWindConfig>({
-    enabled: true,
-    pressure: 1.5,
-    imfBx: 0.5,
-    imfBz: -1.2, // Southward IMF for reconnection
-    speed: 1.2,
-    density: 1.0,
-  });
+  // 3. External Magnetic Sources (Monopoles, Dipoles, Comets)
+  const [sources, setSources] = useState<ExternalMagneticSource[]>([]);
 
-  // 4. Atmospheric Cloud Particle Model Configuration ("가상 지진운")
-  const [cloudConfig, setCloudConfig] = useState<AtmosphericCloudConfig>({
-    enabled: true,
-    particleCount: 500,
-    polarizationSusceptibility: 1.2,
-    chargeRatio: 0.6,
-    condensationThreshold: 0.8,
-    showParticles: true,
-    showCloudBands: true,
-    cloudOpacity: 0.85,
-    viscosity: 0.08,
-  });
+  // 4. Solar Wind & IMF Configuration
+  const [solarWind, setSolarWind] = useState<SolarWindConfig>({ ...DEFAULT_SOLAR_WIND });
 
-  // 5. Physics Engines Instances
+  // 5. Lunar Satellite & Tidal Physics Configuration
+  const [moonConfig, setMoonConfig] = useState<MoonConfig>({ ...DEFAULT_MOON_CONFIG });
+
+  // 6. Atmospheric Cloud Particle Model Configuration ("가상 지진운")
+  const [cloudConfig, setCloudConfig] = useState<AtmosphericCloudConfig>({ ...DEFAULT_CLOUD_CONFIG });
+
+  // 7. Physics Engines Instances
   const stressManager = useMemo(() => new CrustalStressManager(48), []);
   const particleSystem = useMemo(() => new CloudParticleSystem(500), []);
 
-  // 6. View & UI State
+  // 8. View & UI State
   const [viewMode, setViewMode] = useState<'2D' | '3D' | 'split'>('2D');
   const [renderMode, setRenderMode] = useState<RenderMode>('composite');
   const [heatmapMetric, setHeatmapMetric] = useState<HeatmapMetric>('magnitude');
   const [showNeutralPoints, setShowNeutralPoints] = useState<boolean>(true);
   const [streamlineDensity, setStreamlineDensity] = useState<number>(28);
+  const [layerVisibility, setLayerVisibility] = useState<LayerVisibilityConfig>(DEFAULT_LAYER_VISIBILITY);
 
-  const [activeControlTab, setActiveControlTab] = useState<'earth' | 'sources' | 'solar' | 'cloud' | 'stress' | 'presets'>('presets');
+  const [activeControlTab, setActiveControlTab] = useState<'earth' | 'sources' | 'solar' | 'cloud' | 'moon' | 'stress' | 'presets' | 'weather'>('presets');
   const [isPythonModalOpen, setIsPythonModalOpen] = useState<boolean>(false);
   const [latestEarthquake, setLatestEarthquake] = useState<EarthquakeEvent | null>(null);
 
@@ -115,6 +148,7 @@ export default function App() {
       setEarthConfig((prev) => ({ ...prev, moment: 2.5, tiltAngle: 0, reversed: false, x: 0, y: 0 }));
       setSources([]);
       setSolarWind((prev) => ({ ...prev, enabled: false }));
+      setMoonConfig((prev) => ({ ...prev, enabled: true, phaseAngleDeg: 45, autoOrbit: true }));
     } else if (presetKey === 'solar_storm') {
       setEarthConfig((prev) => ({ ...prev, moment: 2.2, tiltAngle: 11, reversed: false, x: 0, y: 0 }));
       setSources([]);
@@ -126,6 +160,7 @@ export default function App() {
         speed: 2.2,
         density: 2.0,
       });
+      setMoonConfig((prev) => ({ ...prev, enabled: true, phaseAngleDeg: 180 }));
     } else if (presetKey === 'third_pole') {
       setEarthConfig((prev) => ({ ...prev, moment: 2.0, tiltAngle: -15, reversed: false, x: 0, y: 0 }));
       setSources([
@@ -157,6 +192,64 @@ export default function App() {
         },
       ]);
       setSolarWind((prev) => ({ ...prev, enabled: true, pressure: 1.2, imfBz: -0.5 }));
+    } else if (presetKey === 'comet_approach') {
+      // 혜성 근접 시뮬레이션 프리셋
+      setEarthConfig((prev) => ({ ...prev, moment: 2.2, tiltAngle: 12, reversed: false, x: 0, y: 0 }));
+      setSources([
+        {
+          id: 'comet-halley-type',
+          name: '근접 외계 혜성 (Comet Nucleus)',
+          type: 'comet',
+          x: -2.8,
+          y: 1.8,
+          strength: 3.6,
+          active: true,
+          orbiting: true,
+          orbitRadius: 3.3,
+          orbitSpeed: 0.45,
+          orbitPhase: 2.4,
+          cometGasActivity: 3.5,
+          cometTailLength: 3.8,
+        },
+      ]);
+      setSolarWind({
+        enabled: true,
+        pressure: 1.8,
+        imfBx: 0.4,
+        imfBz: -1.2,
+        speed: 1.6,
+        density: 1.4,
+      });
+      setCloudConfig((prev) => ({
+        ...prev,
+        enabled: true,
+        showWaveClouds: true,
+        polarizationSusceptibility: 1.6,
+      }));
+    } else if (presetKey === 'lunar_syzygy') {
+      // 달 삭/망 조석 기조력 및 지각 공명 프리셋
+      setEarthConfig((prev) => ({ ...prev, moment: 2.3, tiltAngle: 11, reversed: false, x: 0, y: 0 }));
+      setSources([]);
+      setSolarWind({
+        enabled: true,
+        pressure: 1.4,
+        imfBx: 0.2,
+        imfBz: -0.8,
+        speed: 1.2,
+        density: 1.2,
+      });
+      setMoonConfig({
+        ...DEFAULT_MOON_CONFIG,
+        enabled: true,
+        phaseAngleDeg: 180, // Full Moon entering magnetotail
+        tidalStressWeight: 0.45,
+        remanentMoment: 0.22,
+        autoOrbit: true,
+        orbitSpeed: 0.5,
+      });
+      // Prime near-rupture nodes
+      stressManager.nodes[0].accumulatedStress = 0.81;
+      stressManager.nodes[24].accumulatedStress = 0.83;
     } else if (presetKey === 'critical_earthquake') {
       setEarthConfig((prev) => ({ ...prev, moment: 2.8, tiltAngle: 25, reversed: false, x: 0, y: 0 }));
       setSources([
@@ -204,6 +297,36 @@ export default function App() {
     }
   };
 
+  // Full Simulation Reset Functionality (기본값 복원 및 외부 자극 완전 제거)
+  const handleResetSimulation = useCallback(() => {
+    setEarthConfig({ ...DEFAULT_EARTH_CONFIG });
+    setSources([]); // 모든 외부 자극원 제거
+    setSolarWind({ ...DEFAULT_SOLAR_WIND }); // 외부 태양풍 자극 비활성화
+    setMoonConfig({ ...DEFAULT_MOON_CONFIG }); // 달 정상 궤도 기본값 복원
+    setCloudConfig({ ...DEFAULT_CLOUD_CONFIG });
+    setWeatherData(GLOBAL_WEATHER_PRESETS[0].data); // 기본 대한민국 수원 기상데이터 복원
+
+    // Crustal Stress Engine 초기화
+    if (stressManager) {
+      stressManager.nodes.forEach((n) => {
+        n.accumulatedStress = 0.05 + Math.random() * 0.08;
+        n.ruptured = false;
+      });
+      stressManager.activeWaves = [];
+    }
+
+    // Particle System 초기화
+    if (particleSystem) {
+      particleSystem.init(500);
+    }
+
+    setLatestEarthquake(null);
+    setRenderMode('composite');
+    setHeatmapMetric('magnitude');
+    setShowNeutralPoints(true);
+    setLayerVisibility(DEFAULT_LAYER_VISIBILITY);
+  }, [stressManager, particleSystem]);
+
   return (
     <div className="min-h-screen bg-[#0a0a0c] text-slate-200 flex flex-col font-sans selection:bg-cyan-500/30 selection:text-cyan-200 antialiased">
       {/* Top Main Navigation Header - High Density */}
@@ -228,6 +351,17 @@ export default function App() {
 
         {/* View Switchers & Export Actions */}
         <div className="flex items-center gap-2">
+          {/* Global Simulation Reset Button */}
+          <button
+            id="btn-global-reset-simulation"
+            onClick={handleResetSimulation}
+            title="시뮬레이션을 기본값으로 리셋하고 모든 외부 자극원을 제거합니다"
+            className="px-2.5 py-1 text-xs font-mono font-medium rounded-md bg-red-950/40 hover:bg-red-900/60 text-red-300 border border-red-500/30 transition-all flex items-center gap-1.5 shadow-sm active:scale-95"
+          >
+            <RotateCcw className="w-3.5 h-3.5 text-red-400" />
+            <span className="hidden sm:inline">시뮬레이션 리셋</span>
+          </button>
+
           {/* 2D / 3D / Split Switcher */}
           <div className="flex items-center p-0.5 bg-[#0a0a0e] rounded-md border border-[#1e1e24] text-xs font-medium">
             <button
@@ -294,6 +428,8 @@ export default function App() {
                 setSources={setSources}
                 solarWind={solarWind}
                 setSolarWind={setSolarWind}
+                moonConfig={moonConfig}
+                setMoonConfig={setMoonConfig}
                 cloudConfig={cloudConfig}
                 setCloudConfig={setCloudConfig}
                 stressManager={stressManager}
@@ -306,6 +442,8 @@ export default function App() {
                 showNeutralPoints={showNeutralPoints}
                 setShowNeutralPoints={setShowNeutralPoints}
                 streamlineDensity={streamlineDensity}
+                layerVisibility={layerVisibility}
+                setLayerVisibility={setLayerVisibility}
               />
             )}
 
@@ -327,6 +465,8 @@ export default function App() {
                   setSources={setSources}
                   solarWind={solarWind}
                   setSolarWind={setSolarWind}
+                  moonConfig={moonConfig}
+                  setMoonConfig={setMoonConfig}
                   cloudConfig={cloudConfig}
                   setCloudConfig={setCloudConfig}
                   stressManager={stressManager}
@@ -339,6 +479,8 @@ export default function App() {
                   showNeutralPoints={showNeutralPoints}
                   setShowNeutralPoints={setShowNeutralPoints}
                   streamlineDensity={streamlineDensity}
+                  layerVisibility={layerVisibility}
+                  setLayerVisibility={setLayerVisibility}
                 />
                 <Magnetosphere3DView
                   earthConfig={earthConfig}
@@ -354,7 +496,7 @@ export default function App() {
           <MathFormulaCard />
         </div>
 
-        {/* Right Sidebar: Physics Control Deck & Gemini AI Expert Studio */}
+        {/* Right Sidebar: Physics Control Deck */}
         <div className="lg:col-span-5 xl:col-span-4 flex flex-col gap-3.5">
           {/* Controls Deck */}
           <PhysicsControls
@@ -364,23 +506,18 @@ export default function App() {
             setSources={setSources}
             solarWind={solarWind}
             setSolarWind={setSolarWind}
+            moonConfig={moonConfig}
+            setMoonConfig={setMoonConfig}
             cloudConfig={cloudConfig}
             setCloudConfig={setCloudConfig}
             stressManager={stressManager}
+            weatherData={weatherData}
+            setWeatherData={setWeatherData}
             onEarthquakeTriggered={handleEarthquakeTriggered}
             onApplyPreset={handleApplyPreset}
+            onResetSimulation={handleResetSimulation}
             activeTab={activeControlTab}
             setActiveTab={setActiveControlTab}
-          />
-
-          {/* Gemini AI Computational Physics Expert Studio */}
-          <GeminiExpertAssistant
-            earthConfig={earthConfig}
-            sources={sources}
-            solarWind={solarWind}
-            maxStress={stressManager.maxStressValue}
-            maxStressNodeIndex={stressManager.maxStressNodeIndex}
-            alignmentOrder={particleSystem.globalAlignmentOrder}
           />
         </div>
       </main>

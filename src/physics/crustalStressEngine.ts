@@ -1,4 +1,4 @@
-import { CrustalNode, EarthDipoleConfig, EarthquakeEvent, ExternalMagneticSource, SolarWindConfig } from '../types';
+import { CrustalNode, EarthDipoleConfig, EarthquakeEvent, ExternalMagneticSource, MoonConfig, SolarWindConfig } from '../types';
 import { computeTotalMagneticField, computeFieldGradient } from './magneticEngine';
 
 export interface SeismicWave {
@@ -53,10 +53,14 @@ export class CrustalStressManager {
     sources: ExternalMagneticSource[],
     solarWind: SolarWindConfig,
     dt: number = 0.016,
-    onEarthquakeTriggered?: (event: EarthquakeEvent) => void
+    onEarthquakeTriggered?: (event: EarthquakeEvent) => void,
+    moonConfig?: MoonConfig
   ) {
     let currentMax = 0;
     let maxIdx = 0;
+
+    const moonRad = moonConfig && moonConfig.enabled ? (moonConfig.phaseAngleDeg * Math.PI) / 180 : 0;
+    const moonTidalWeight = moonConfig && moonConfig.enabled ? (moonConfig.tidalStressWeight ?? 0.25) : 0;
 
     for (let i = 0; i < this.nodes.length; i++) {
       const node = this.nodes[i];
@@ -65,19 +69,23 @@ export class CrustalStressManager {
       node.y = earthConfig.y + Math.sin(node.angle) * radius;
 
       // Magnetic field and gradient at crustal fault node
-      const field = computeTotalMagneticField(node.x, node.y, earthConfig, sources, solarWind);
-      const grad = computeFieldGradient(node.x, node.y, earthConfig, sources, solarWind);
+      const field = computeTotalMagneticField(node.x, node.y, earthConfig, sources, solarWind, moonConfig);
+      const grad = computeFieldGradient(node.x, node.y, earthConfig, sources, solarWind, moonConfig);
 
       // Magneto-piezoelectric / piezomagnetic stress influx
       const magneticStressRate =
         this.couplingCoefficient * (field.magnitude * field.magnitude) +
         this.gradientCoupling * grad.gradMag;
 
+      // Solid Earth Tidal Gravitational Stress contribution:
+      // Delta sigma_tide ~ cos(2 * (phi - theta_moon))
+      const tidalModulation = moonTidalWeight * 0.06 * Math.cos(2 * (node.angle - moonRad));
+
       // Continuous accumulation and viscoelastic dissipation
-      node.accumulatedStress += (magneticStressRate - this.dissipationRate * node.accumulatedStress) * dt * 3.0;
+      node.accumulatedStress += (magneticStressRate + tidalModulation - this.dissipationRate * node.accumulatedStress) * dt * 3.0;
 
       // Clamp lower bound
-      if (node.accumulatedStress < 0.05) node.accumulatedStress = 0.05;
+      if (node.accumulatedStress < 0.02) node.accumulatedStress = 0.02;
 
       // Track max stress
       if (node.accumulatedStress > currentMax) {

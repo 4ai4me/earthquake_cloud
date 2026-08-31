@@ -6,6 +6,8 @@ import {
   EarthquakeEvent,
   ExternalMagneticSource,
   HeatmapMetric,
+  LayerVisibilityConfig,
+  MoonConfig,
   RenderMode,
   SolarWindConfig,
 } from '../types';
@@ -17,6 +19,7 @@ import {
   computeInterferenceIntensity,
   computeHotspotMask,
   computeWaveCloudDensity,
+  computeNaturalWeatherCloudDensity,
   applyCloudGamma,
   getInspectionCloudColor,
 } from '../physics/magneticEngine';
@@ -24,6 +27,7 @@ import { CloudParticleSystem } from '../physics/cloudParticleEngine';
 import { CrustalStressManager, SeismicWave } from '../physics/crustalStressEngine';
 import { GroundSkyDomeView } from './GroundSkyDomeView';
 import { CloudInspectionSplitView } from './CloudInspectionSplitView';
+import { VisualElementsGuidePanel, DEFAULT_LAYER_VISIBILITY } from './VisualElementsGuidePanel';
 import {
   Eye,
   Layers,
@@ -44,7 +48,11 @@ import {
   Sparkles,
   Compass,
   Columns,
+  Moon,
   Sliders,
+  Wind,
+  Zap,
+  X,
 } from 'lucide-react';
 
 interface SimulationCanvas2DProps {
@@ -54,6 +62,8 @@ interface SimulationCanvas2DProps {
   setSources: React.Dispatch<React.SetStateAction<ExternalMagneticSource[]>>;
   solarWind: SolarWindConfig;
   setSolarWind: React.Dispatch<React.SetStateAction<SolarWindConfig>>;
+  moonConfig?: MoonConfig;
+  setMoonConfig?: React.Dispatch<React.SetStateAction<MoonConfig>>;
   cloudConfig: AtmosphericCloudConfig;
   setCloudConfig: React.Dispatch<React.SetStateAction<AtmosphericCloudConfig>>;
   stressManager: CrustalStressManager;
@@ -66,6 +76,8 @@ interface SimulationCanvas2DProps {
   showNeutralPoints: boolean;
   setShowNeutralPoints: (show: boolean) => void;
   streamlineDensity: number;
+  layerVisibility?: LayerVisibilityConfig;
+  setLayerVisibility?: React.Dispatch<React.SetStateAction<LayerVisibilityConfig>>;
 }
 
 export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
@@ -75,6 +87,8 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
   setSources,
   solarWind,
   setSolarWind,
+  moonConfig,
+  setMoonConfig,
   cloudConfig,
   setCloudConfig,
   stressManager,
@@ -87,9 +101,16 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
   showNeutralPoints,
   setShowNeutralPoints,
   streamlineDensity,
+  layerVisibility,
+  setLayerVisibility,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+
+  // Layer Visibility State fallback
+  const [internalLayerVisibility, setInternalLayerVisibility] = useState<LayerVisibilityConfig>(DEFAULT_LAYER_VISIBILITY);
+  const currentLayers = layerVisibility || internalLayerVisibility;
+  const updateLayers = setLayerVisibility || setInternalLayerVisibility;
 
   // Viewport transformation
   const [zoom, setZoom] = useState<number>(75); // pixels per world unit
@@ -100,9 +121,10 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
   // Dragging entities
   const [draggedSourceId, setDraggedSourceId] = useState<string | null>(null);
   const [isDraggingEarth, setIsDraggingEarth] = useState<boolean>(false);
+  const [isDraggingMoon, setIsDraggingMoon] = useState<boolean>(false);
 
-  // Hover inspect state
-  const [hoverInfo, setHoverInfo] = useState<{
+  // Right-click Vector Probe & Hotspot inspection state (shown ONLY on user right-click)
+  const [probeInfo, setProbeInfo] = useState<{
     x: number;
     y: number;
     worldX: number;
@@ -196,7 +218,7 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
       if (isPlaying) {
         setAnimationPhase((prev) => (prev + dt * 1.5) % 1000);
 
-        // Update external orbiting sources
+        // Update external orbiting sources (including Comets)
         setSources((prev) =>
           prev.map((s) => {
             if (s.active && s.orbiting && s.orbitRadius && s.orbitSpeed) {
@@ -212,11 +234,19 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
           })
         );
 
+        // Update Moon Orbit if autoOrbit enabled
+        if (moonConfig?.enabled && moonConfig.autoOrbit && setMoonConfig) {
+          setMoonConfig((prev) => ({
+            ...prev,
+            phaseAngleDeg: (prev.phaseAngleDeg + (prev.orbitSpeed ?? 0.3) * dt * 25) % 360,
+          }));
+        }
+
         // Update atmospheric cloud particles
         particleSystem.update(cloudConfig, earthConfig, sources, solarWind, dt, animationPhase);
 
-        // Update crustal stress and check seismic ruptures
-        stressManager.update(earthConfig, sources, solarWind, dt, onEarthquakeTriggered);
+        // Update crustal stress and check seismic ruptures with Solid Earth Tidal Modulation
+        stressManager.update(earthConfig, sources, solarWind, dt, onEarthquakeTriggered, moonConfig);
       }
 
       const canvas = canvasRef.current;
@@ -263,8 +293,12 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
             );
 
             if (cloudConfig.inspectionMode === 'cloud_density' || cloudConfig.inspectionMode === 'cloud_vector_overlay') {
-              if (waveData.density > 0.01) {
-                const visDensity = applyCloudGamma(waveData.density, currentGamma);
+              // Blend natural meteorological cloud background with stimulated earthquake wave cloud patterns
+              const naturalDensity = computeNaturalWeatherCloudDensity(worldPos.wx, worldPos.wy, cloudConfig.weatherData, animationPhase);
+              const combinedDensity = Math.max(waveData.density, naturalDensity * 0.7);
+
+              if (combinedDensity > 0.01) {
+                const visDensity = applyCloudGamma(combinedDensity, currentGamma);
                 ctx.fillStyle = getInspectionCloudColor(visDensity, palette, visDensity * 0.95);
                 ctx.fillRect(px, py, step, step);
               }
@@ -356,43 +390,46 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
       ctx.fillStyle = '#030712'; // Tailwind gray-950
       ctx.fillRect(0, 0, width, height);
 
-      // 1. Draw Background Grid & Coordinates
-      ctx.strokeStyle = 'rgba(30, 41, 59, 0.5)';
-      ctx.lineWidth = 1;
-      const origin = worldToCanvas(0, 0, width, height);
-
-      // Grid lines
+      // Common viewport world bounds
       const minWorld = canvasToWorld(0, height, width, height);
       const maxWorld = canvasToWorld(width, 0, width, height);
 
-      for (let x = Math.floor(minWorld.wx); x <= Math.ceil(maxWorld.wx); x++) {
-        const p1 = worldToCanvas(x, minWorld.wy, width, height);
-        const p2 = worldToCanvas(x, maxWorld.wy, width, height);
-        ctx.beginPath();
-        ctx.moveTo(p1.cx, p1.cy);
-        ctx.lineTo(p2.cx, p2.cy);
-        ctx.stroke();
-      }
-      for (let y = Math.floor(minWorld.wy); y <= Math.ceil(maxWorld.wy); y++) {
-        const p1 = worldToCanvas(minWorld.wx, y, width, height);
-        const p2 = worldToCanvas(maxWorld.wx, y, width, height);
-        ctx.beginPath();
-        ctx.moveTo(p1.cx, p1.cy);
-        ctx.lineTo(p2.cx, p2.cy);
-        ctx.stroke();
-      }
+      // 1. Draw Background Grid & Coordinates
+      if (currentLayers.gridAxes) {
+        ctx.strokeStyle = 'rgba(30, 41, 59, 0.5)';
+        ctx.lineWidth = 1;
+        const origin = worldToCanvas(0, 0, width, height);
 
-      // Origin axes
-      ctx.strokeStyle = 'rgba(71, 85, 105, 0.6)';
-      ctx.beginPath();
-      ctx.moveTo(0, origin.cy);
-      ctx.lineTo(width, origin.cy);
-      ctx.moveTo(origin.cx, 0);
-      ctx.lineTo(origin.cx, height);
-      ctx.stroke();
+        // Grid lines
+        for (let x = Math.floor(minWorld.wx); x <= Math.ceil(maxWorld.wx); x++) {
+          const p1 = worldToCanvas(x, minWorld.wy, width, height);
+          const p2 = worldToCanvas(x, maxWorld.wy, width, height);
+          ctx.beginPath();
+          ctx.moveTo(p1.cx, p1.cy);
+          ctx.lineTo(p2.cx, p2.cy);
+          ctx.stroke();
+        }
+        for (let y = Math.floor(minWorld.wy); y <= Math.ceil(maxWorld.wy); y++) {
+          const p1 = worldToCanvas(minWorld.wx, y, width, height);
+          const p2 = worldToCanvas(maxWorld.wx, y, width, height);
+          ctx.beginPath();
+          ctx.moveTo(p1.cx, p1.cy);
+          ctx.lineTo(p2.cx, p2.cy);
+          ctx.stroke();
+        }
+
+        // Origin axes
+        ctx.strokeStyle = 'rgba(71, 85, 105, 0.6)';
+        ctx.beginPath();
+        ctx.moveTo(0, origin.cy);
+        ctx.lineTo(width, origin.cy);
+        ctx.moveTo(origin.cx, 0);
+        ctx.lineTo(origin.cx, height);
+        ctx.stroke();
+      }
 
       // 2. Render Heatmap (if active)
-      if (renderMode === 'heatmap' || renderMode === 'composite') {
+      if (currentLayers.heatmap && (renderMode === 'heatmap' || renderMode === 'composite')) {
         const cellSize = 16;
         const cols = Math.ceil(width / cellSize);
         const rows = Math.ceil(height / cellSize);
@@ -445,7 +482,7 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
       }
 
       // 3. Render Solar Wind Flow (Upstream Sunward Particles)
-      if (solarWind.enabled) {
+      if (solarWind.enabled && currentLayers.solarWind) {
         ctx.save();
         const swCount = 24;
         for (let i = 0; i < swCount; i++) {
@@ -470,7 +507,7 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
       }
 
       // 4. Render Magnetic Streamlines (RK4)
-      if (renderMode === 'streamlines' || renderMode === 'composite') {
+      if (currentLayers.streamlines && (renderMode === 'streamlines' || renderMode === 'composite')) {
         const seedAngles = streamlineDensity || 24;
         const startDistances = [earthConfig.radius * 1.05, earthConfig.radius * 1.4, earthConfig.radius * 2.2];
 
@@ -548,7 +585,7 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
       }
 
       // 5. Render Quiver Vector Needles (if in quiver mode)
-      if (renderMode === 'quiver') {
+      if (currentLayers.streamlines && renderMode === 'quiver') {
         ctx.save();
         const step = 0.5;
         for (let qx = Math.floor(minWorld.wx); qx <= Math.ceil(maxWorld.wx); qx += step) {
@@ -583,84 +620,102 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
       if (cloudConfig.enabled) {
         ctx.save();
 
-        // A. Draw Wave Cloud (양떼구름) Hotspot Ripples & Altocumulus Wave Billows
-        if (cloudConfig.showWaveClouds) {
-          // Render periodic wave billow bands perpendicular to local B-field
-          const stepSize = 0.45;
-          const kPerpFactor = (2 * Math.PI) / (cloudConfig.waveWavelength || 0.8);
-          
+        // A. Draw Natural Weather Meteorological Clouds (평상시 세계 기상데이터 기반 대기 구름)
+        if (currentLayers.cloudBands && cloudConfig.weatherData) {
+          const stepSize = 0.5;
           for (let wx = -4.5; wx <= 4.5; wx += stepSize) {
             for (let wy = -3.0; wy <= 3.0; wy += stepSize) {
-              const interf = computeInterferenceIntensity(
+              const naturalDensity = computeNaturalWeatherCloudDensity(
+                wx,
+                wy,
+                cloudConfig.weatherData,
+                animationPhase
+              );
+
+              if (naturalDensity > 0.18) {
+                const centerCanvas = worldToCanvas(wx, wy, width, height);
+                const puffRadius = (12 + naturalDensity * 18) * (zoom / 75);
+                const puffAlpha = naturalDensity * cloudConfig.cloudOpacity * 0.45;
+
+                const grad = ctx.createRadialGradient(
+                  centerCanvas.cx,
+                  centerCanvas.cy,
+                  0,
+                  centerCanvas.cx,
+                  centerCanvas.cy,
+                  puffRadius
+                );
+                grad.addColorStop(0, `rgba(215, 235, 250, ${puffAlpha})`);
+                grad.addColorStop(0.6, `rgba(180, 215, 245, ${puffAlpha * 0.4})`);
+                grad.addColorStop(1, 'rgba(180, 215, 245, 0)');
+
+                ctx.fillStyle = grad;
+                ctx.beginPath();
+                ctx.arc(centerCanvas.cx, centerCanvas.cy, puffRadius, 0, Math.PI * 2);
+                ctx.fill();
+              }
+            }
+          }
+        }
+
+        // B. Draw Wave Cloud (양떼구름 / 지진운): 외부 자극원이 일정 이상일 때만 국소 활성화되어 나타남
+        if (cloudConfig.showWaveClouds && currentLayers.waveClouds) {
+          const stepSize = 0.45;
+          for (let wx = -4.5; wx <= 4.5; wx += stepSize) {
+            for (let wy = -3.0; wy <= 3.0; wy += stepSize) {
+              const waveData = computeWaveCloudDensity(
                 wx,
                 wy,
                 earthConfig,
                 sources,
                 solarWind,
-                cloudConfig.gradientWeight ?? 0.5
-              );
-              const mask = computeHotspotMask(
-                interf.intensity,
-                cloudConfig.interferenceThreshold ?? 0.85,
-                cloudConfig.sigmoidSteepness ?? 6.0
+                cloudConfig,
+                animationPhase
               );
 
-              if (mask > 0.08) {
+              if (waveData.density > 0.12 && waveData.isStimulated) {
                 const centerCanvas = worldToCanvas(wx, wy, width, height);
-                const field = computeTotalMagneticField(wx, wy, earthConfig, sources, solarWind);
+                const density = waveData.density;
+
+                // Draw altocumulus sheep puff (양떼구름 파동 조각)
+                const puffRadius = (8 + density * 14) * (zoom / 75);
+                const puffAlpha = density * cloudConfig.cloudOpacity * 0.75;
                 
-                if (field.magnitude > 0.02) {
-                  // Unit vector perp to field line
-                  const bxNorm = field.bx / field.magnitude;
-                  const byNorm = field.by / field.magnitude;
-                  const nPerpX = -byNorm;
-                  const nPerpY = bxNorm;
+                const grad = ctx.createRadialGradient(
+                  centerCanvas.cx,
+                  centerCanvas.cy,
+                  0,
+                  centerCanvas.cx,
+                  centerCanvas.cy,
+                  puffRadius
+                );
+                grad.addColorStop(0, `rgba(240, 249, 255, ${puffAlpha})`);
+                grad.addColorStop(0.5, `rgba(186, 230, 253, ${puffAlpha * 0.55})`);
+                grad.addColorStop(1, 'rgba(186, 230, 253, 0)');
 
-                  // Wave spatial phase
-                  const kDotR = (nPerpX * wx + nPerpY * wy) * kPerpFactor;
-                  const waveMod = (1 + Math.cos(kDotR - animationPhase * 0.8)) * 0.5;
-                  const density = mask * waveMod;
+                ctx.fillStyle = grad;
+                ctx.beginPath();
+                ctx.arc(centerCanvas.cx, centerCanvas.cy, puffRadius, 0, Math.PI * 2);
+                ctx.fill();
 
-                  if (density > 0.15) {
-                    // Draw altocumulus sheep puff (양떼구름 조각)
-                    const puffRadius = (8 + density * 12) * (zoom / 75);
-                    const puffAlpha = density * cloudConfig.cloudOpacity * 0.65;
-                    
-                    const grad = ctx.createRadialGradient(
-                      centerCanvas.cx,
-                      centerCanvas.cy,
-                      0,
-                      centerCanvas.cx,
-                      centerCanvas.cy,
-                      puffRadius
-                    );
-                    grad.addColorStop(0, `rgba(224, 242, 254, ${puffAlpha})`);
-                    grad.addColorStop(0.5, `rgba(186, 230, 253, ${puffAlpha * 0.5})`);
-                    grad.addColorStop(1, 'rgba(186, 230, 253, 0)');
-
-                    ctx.fillStyle = grad;
-                    ctx.beginPath();
-                    ctx.arc(centerCanvas.cx, centerCanvas.cy, puffRadius, 0, Math.PI * 2);
-                    ctx.fill();
-
-                    // Wave ridge contour line
-                    if (density > 0.45) {
-                      const ridgeLen = 10 * (zoom / 75);
-                      const anglePerp = Math.atan2(-nPerpY, nPerpX); // inverted Y for canvas
-                      ctx.strokeStyle = `rgba(255, 255, 255, ${density * 0.4})`;
-                      ctx.lineWidth = 1.5;
-                      ctx.beginPath();
-                      ctx.moveTo(
-                        centerCanvas.cx - Math.cos(anglePerp) * ridgeLen,
-                        centerCanvas.cy - Math.sin(anglePerp) * ridgeLen
-                      );
-                      ctx.lineTo(
-                        centerCanvas.cx + Math.cos(anglePerp) * ridgeLen,
-                        centerCanvas.cy + Math.sin(anglePerp) * ridgeLen
-                      );
-                      ctx.stroke();
-                    }
-                  }
+                // Wave ridge contour line perpendicular to magnetic field
+                if (density > 0.35 && waveData.bTotal > 0.01) {
+                  const ridgeLen = 12 * (zoom / 75);
+                  const nPerpX = waveData.kPerpX / Math.max(0.001, Math.hypot(waveData.kPerpX, waveData.kPerpY));
+                  const nPerpY = waveData.kPerpY / Math.max(0.001, Math.hypot(waveData.kPerpX, waveData.kPerpY));
+                  const anglePerp = Math.atan2(-nPerpY, nPerpX); // inverted Y for canvas
+                  ctx.strokeStyle = `rgba(255, 255, 255, ${density * 0.55})`;
+                  ctx.lineWidth = 1.6;
+                  ctx.beginPath();
+                  ctx.moveTo(
+                    centerCanvas.cx - Math.cos(anglePerp) * ridgeLen,
+                    centerCanvas.cy - Math.sin(anglePerp) * ridgeLen
+                  );
+                  ctx.lineTo(
+                    centerCanvas.cx + Math.cos(anglePerp) * ridgeLen,
+                    centerCanvas.cy + Math.sin(anglePerp) * ridgeLen
+                  );
+                  ctx.stroke();
                 }
               }
             }
@@ -668,7 +723,7 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
         }
 
         // B. Draw Coherent Cloud Band Ridges (Connecting highly aligned nearby particles)
-        if (cloudConfig.showCloudBands) {
+        if (cloudConfig.showCloudBands && currentLayers.cloudBands) {
           ctx.strokeStyle = 'rgba(224, 242, 254, 0.18)'; // Pale cyan vapor
           ctx.lineWidth = 4.0;
           ctx.lineCap = 'round';
@@ -695,7 +750,7 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
         }
 
         // C. Draw Individual Aerosol / Cloud Droplet Particles
-        if (cloudConfig.showParticles) {
+        if (cloudConfig.showParticles && currentLayers.cloudParticles) {
           for (const p of particleSystem.particles) {
             const pCanvas = worldToCanvas(p.x, p.y, width, height);
             const radius = p.size * (1 + p.condensationFactor * 0.8);
@@ -737,159 +792,169 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
       }
 
       // 7. Render Seismic Rupture Shockwaves (P-waves & S-waves)
-      ctx.save();
-      for (const wave of stressManager.activeWaves) {
-        const epic = worldToCanvas(wave.epicenterX, wave.epicenterY, width, height);
-        const pixelRadius = wave.currentRadius * zoom;
+      if (currentLayers.seismicWaves) {
+        ctx.save();
+        for (const wave of stressManager.activeWaves) {
+          const epic = worldToCanvas(wave.epicenterX, wave.epicenterY, width, height);
+          const pixelRadius = wave.currentRadius * zoom;
 
-        ctx.strokeStyle =
-          wave.type === 'P_wave'
-            ? `rgba(239, 68, 68, ${wave.opacity * 0.85})` // Crimson P-wave
-            : `rgba(249, 115, 22, ${wave.opacity * 0.75})`; // Amber S-wave
-        ctx.lineWidth = wave.type === 'P_wave' ? 3.0 : 2.0;
+          ctx.strokeStyle =
+            wave.type === 'P_wave'
+              ? `rgba(239, 68, 68, ${wave.opacity * 0.85})` // Crimson P-wave
+              : `rgba(249, 115, 22, ${wave.opacity * 0.75})`; // Amber S-wave
+          ctx.lineWidth = wave.type === 'P_wave' ? 3.0 : 2.0;
 
-        ctx.beginPath();
-        ctx.arc(epic.cx, epic.cy, pixelRadius, 0, Math.PI * 2);
-        ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(epic.cx, epic.cy, pixelRadius, 0, Math.PI * 2);
+          ctx.stroke();
 
-        // Wavefront ripples
-        ctx.strokeStyle = `rgba(254, 202, 202, ${wave.opacity * 0.4})`;
-        ctx.lineWidth = 1.0;
-        ctx.beginPath();
-        ctx.arc(epic.cx, epic.cy, Math.max(0, pixelRadius - 10), 0, Math.PI * 2);
-        ctx.stroke();
+          // Wavefront ripples
+          ctx.strokeStyle = `rgba(254, 202, 202, ${wave.opacity * 0.4})`;
+          ctx.lineWidth = 1.0;
+          ctx.beginPath();
+          ctx.arc(epic.cx, epic.cy, Math.max(0, pixelRadius - 10), 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        ctx.restore();
       }
-      ctx.restore();
 
       // 8. Render Earth Planetary Body, Atmosphere Halo & Crustal Fault Ring
       const earthCanvas = worldToCanvas(earthConfig.x, earthConfig.y, width, height);
       const earthPixelRadius = earthConfig.radius * zoom;
 
-      ctx.save();
-      // Outer Atmosphere Glow Halo
-      const atmoGrad = ctx.createRadialGradient(
-        earthCanvas.cx,
-        earthCanvas.cy,
-        earthPixelRadius * 0.9,
-        earthCanvas.cx,
-        earthCanvas.cy,
-        earthPixelRadius * 1.5
-      );
-      atmoGrad.addColorStop(0, 'rgba(56, 189, 248, 0.4)');
-      atmoGrad.addColorStop(0.6, 'rgba(14, 165, 233, 0.15)');
-      atmoGrad.addColorStop(1, 'rgba(3, 105, 161, 0)');
-      ctx.fillStyle = atmoGrad;
-      ctx.beginPath();
-      ctx.arc(earthCanvas.cx, earthCanvas.cy, earthPixelRadius * 1.5, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Planet Sphere Fill
-      const earthGrad = ctx.createRadialGradient(
-        earthCanvas.cx - earthPixelRadius * 0.3,
-        earthCanvas.cy - earthPixelRadius * 0.3,
-        earthPixelRadius * 0.1,
-        earthCanvas.cx,
-        earthCanvas.cy,
-        earthPixelRadius
-      );
-      earthGrad.addColorStop(0, '#1e293b'); // Lithosphere / Oceans
-      earthGrad.addColorStop(0.7, '#0f172a');
-      earthGrad.addColorStop(1, '#020617');
-      ctx.fillStyle = earthGrad;
-      ctx.beginPath();
-      ctx.arc(earthCanvas.cx, earthCanvas.cy, earthPixelRadius, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.strokeStyle = '#38bdf8';
-      ctx.lineWidth = 2.0;
-      ctx.stroke();
-
-      // Dipole Axis Indicator
-      const radTilt = (earthConfig.tiltAngle * Math.PI) / 180;
-      const poleDist = earthPixelRadius * 0.85;
-
-      // North Magnetic Pole (Positive / Red)
-      const npX = earthCanvas.cx + Math.sin(radTilt) * poleDist;
-      const npY = earthCanvas.cy - Math.cos(radTilt) * poleDist;
-      // South Magnetic Pole (Negative / Blue)
-      const spX = earthCanvas.cx - Math.sin(radTilt) * poleDist;
-      const spY = earthCanvas.cy + Math.cos(radTilt) * poleDist;
-
-      // Magnetic Axis Line
-      ctx.strokeStyle = 'rgba(148, 163, 184, 0.4)';
-      ctx.setLineDash([4, 4]);
-      ctx.beginPath();
-      ctx.moveTo(npX, npY);
-      ctx.lineTo(spX, spY);
-      ctx.stroke();
-      ctx.setLineDash([]);
-
-      // Pole Markers
-      ctx.fillStyle = earthConfig.reversed ? '#3b82f6' : '#ef4444';
-      ctx.beginPath();
-      ctx.arc(npX, npY, 6, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 9px monospace';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(earthConfig.reversed ? 'S' : 'N', npX, npY);
-
-      ctx.fillStyle = earthConfig.reversed ? '#ef4444' : '#3b82f6';
-      ctx.beginPath();
-      ctx.arc(spX, spY, 6, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#ffffff';
-      ctx.fillText(earthConfig.reversed ? 'N' : 'S', spX, spY);
-
-      // Planet Label
-      ctx.fillStyle = '#94a3b8';
-      ctx.font = '11px sans-serif';
-      ctx.fillText('Earth Dipole', earthCanvas.cx, earthCanvas.cy);
-      ctx.restore();
-
-      // 9. Render Crustal Fault Nodes & Stress Accumulation Rings
-      ctx.save();
-      for (const node of stressManager.nodes) {
-        const nodeCanvas = worldToCanvas(node.x, node.y, width, height);
-
-        // Stress level color from green to fiery crimson
-        const stressRatio = Math.min(1.0, node.accumulatedStress / stressManager.ruptureThreshold);
-        let nodeColor = '#22c55e'; // Safe green
-        if (stressRatio > 0.8) {
-          nodeColor = '#ef4444'; // Critical red
-        } else if (stressRatio > 0.5) {
-          nodeColor = '#f59e0b'; // Elevated amber
-        } else if (stressRatio > 0.3) {
-          nodeColor = '#06b6d4'; // Low cyan
-        }
-
-        const nodeRadius = 3 + stressRatio * 5;
-
-        // Pulsing glow for high stress fault
-        if (stressRatio > 0.75) {
-          ctx.fillStyle = `rgba(239, 68, 68, ${0.4 + 0.4 * Math.sin(animationPhase * 8)})`;
-          ctx.beginPath();
-          ctx.arc(nodeCanvas.cx, nodeCanvas.cy, nodeRadius * 2.2, 0, Math.PI * 2);
-          ctx.fill();
-        }
-
-        ctx.fillStyle = nodeColor;
+      if (currentLayers.earthBody) {
+        ctx.save();
+        // Outer Atmosphere Glow Halo
+        const atmoGrad = ctx.createRadialGradient(
+          earthCanvas.cx,
+          earthCanvas.cy,
+          earthPixelRadius * 0.9,
+          earthCanvas.cx,
+          earthCanvas.cy,
+          earthPixelRadius * 1.5
+        );
+        atmoGrad.addColorStop(0, 'rgba(56, 189, 248, 0.4)');
+        atmoGrad.addColorStop(0.6, 'rgba(14, 165, 233, 0.15)');
+        atmoGrad.addColorStop(1, 'rgba(3, 105, 161, 0)');
+        ctx.fillStyle = atmoGrad;
         ctx.beginPath();
-        ctx.arc(nodeCanvas.cx, nodeCanvas.cy, nodeRadius, 0, Math.PI * 2);
+        ctx.arc(earthCanvas.cx, earthCanvas.cy, earthPixelRadius * 1.5, 0, Math.PI * 2);
         ctx.fill();
 
-        // Node ID or Stress Indicator
-        if (node.id === stressManager.maxStressNodeIndex) {
-          ctx.strokeStyle = '#f87171';
-          ctx.lineWidth = 1.5;
-          ctx.stroke();
-        }
+        // Planet Sphere Fill
+        const earthGrad = ctx.createRadialGradient(
+          earthCanvas.cx - earthPixelRadius * 0.3,
+          earthCanvas.cy - earthPixelRadius * 0.3,
+          earthPixelRadius * 0.1,
+          earthCanvas.cx,
+          earthCanvas.cy,
+          earthPixelRadius
+        );
+        earthGrad.addColorStop(0, '#1e293b'); // Lithosphere / Oceans
+        earthGrad.addColorStop(0.7, '#0f172a');
+        earthGrad.addColorStop(1, '#020617');
+        ctx.fillStyle = earthGrad;
+        ctx.beginPath();
+        ctx.arc(earthCanvas.cx, earthCanvas.cy, earthPixelRadius, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = '#38bdf8';
+        ctx.lineWidth = 2.0;
+        ctx.stroke();
+        ctx.restore();
       }
-      ctx.restore();
+
+      // Dipole Axis Indicator
+      if (currentLayers.dipoleAxis) {
+        ctx.save();
+        const radTilt = (earthConfig.tiltAngle * Math.PI) / 180;
+        const poleDist = earthPixelRadius * 0.85;
+
+        // North Magnetic Pole (Positive / Red)
+        const npX = earthCanvas.cx + Math.sin(radTilt) * poleDist;
+        const npY = earthCanvas.cy - Math.cos(radTilt) * poleDist;
+        // South Magnetic Pole (Negative / Blue)
+        const spX = earthCanvas.cx - Math.sin(radTilt) * poleDist;
+        const spY = earthCanvas.cy + Math.cos(radTilt) * poleDist;
+
+        // Magnetic Axis Line
+        ctx.strokeStyle = 'rgba(148, 163, 184, 0.4)';
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(npX, npY);
+        ctx.lineTo(spX, spY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Pole Markers
+        ctx.fillStyle = earthConfig.reversed ? '#3b82f6' : '#ef4444';
+        ctx.beginPath();
+        ctx.arc(npX, npY, 6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 9px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(earthConfig.reversed ? 'S' : 'N', npX, npY);
+
+        ctx.fillStyle = earthConfig.reversed ? '#ef4444' : '#3b82f6';
+        ctx.beginPath();
+        ctx.arc(spX, spY, 6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(earthConfig.reversed ? 'N' : 'S', spX, spY);
+
+        // Planet Label
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '11px sans-serif';
+        ctx.fillText('Earth Dipole', earthCanvas.cx, earthCanvas.cy);
+        ctx.restore();
+      }
+
+      // 9. Render Crustal Fault Nodes & Stress Accumulation Rings
+      if (currentLayers.crustalNodes) {
+        ctx.save();
+        for (const node of stressManager.nodes) {
+          const nodeCanvas = worldToCanvas(node.x, node.y, width, height);
+
+          // Stress level color from green to fiery crimson
+          const stressRatio = Math.min(1.0, node.accumulatedStress / stressManager.ruptureThreshold);
+          let nodeColor = '#22c55e'; // Safe green
+          if (stressRatio > 0.8) {
+            nodeColor = '#ef4444'; // Critical red
+          } else if (stressRatio > 0.5) {
+            nodeColor = '#f59e0b'; // Elevated amber
+          } else if (stressRatio > 0.3) {
+            nodeColor = '#06b6d4'; // Low cyan
+          }
+
+          const nodeRadius = 3 + stressRatio * 5;
+
+          // Pulsing glow for high stress fault
+          if (stressRatio > 0.75) {
+            ctx.fillStyle = `rgba(239, 68, 68, ${0.4 + 0.4 * Math.sin(animationPhase * 8)})`;
+            ctx.beginPath();
+            ctx.arc(nodeCanvas.cx, nodeCanvas.cy, nodeRadius * 2.2, 0, Math.PI * 2);
+            ctx.fill();
+          }
+
+          ctx.fillStyle = nodeColor;
+          ctx.beginPath();
+          ctx.arc(nodeCanvas.cx, nodeCanvas.cy, nodeRadius, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Node ID or Stress Indicator
+          if (node.id === stressManager.maxStressNodeIndex) {
+            ctx.strokeStyle = '#f87171';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+          }
+        }
+        ctx.restore();
+      }
 
       // 10. Render Neutral Points / X-Points (Magnetic Reconnection Sites)
-      if (showNeutralPoints) {
+      if (showNeutralPoints && currentLayers.neutralPoints) {
         const neutrals = findNeutralPoints(earthConfig, sources, solarWind);
         ctx.save();
         for (const np of neutrals) {
@@ -918,56 +983,377 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
         ctx.restore();
       }
 
-      // 11. Render External Magnetic Sources (Monopoles & Dipoles)
-      ctx.save();
-      for (const s of sources) {
-        if (!s.active) continue;
-        const sCanvas = worldToCanvas(s.x, s.y, width, height);
+      // 11. Render External Magnetic Sources (Monopoles, Dipoles, and Comets)
+      if (currentLayers.externalSources) {
+        ctx.save();
+        for (const s of sources) {
+          if (!s.active) continue;
+          const sCanvas = worldToCanvas(s.x, s.y, width, height);
 
-        // Orbit path ring if orbiting
-        if (s.orbiting && s.orbitRadius) {
-          ctx.strokeStyle = 'rgba(100, 116, 139, 0.25)';
-          ctx.setLineDash([3, 3]);
+          // Orbit path ring if orbiting
+          if (s.orbiting && s.orbitRadius) {
+            ctx.strokeStyle = 'rgba(100, 116, 139, 0.25)';
+            ctx.setLineDash([3, 3]);
+            ctx.beginPath();
+            ctx.arc(earthCanvas.cx, earthCanvas.cy, s.orbitRadius * zoom, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.setLineDash([]);
+          }
+
+          if (s.type === 'comet') {
+            // Comet nucleus & Ionized Gas Tail
+            const tailLen = (s.cometTailLength ?? 3.0) * zoom;
+            const gasActivity = s.cometGasActivity ?? 2.5;
+
+            // Ion tail (points away from Sun / along +x solar wind)
+            const tailGrad = ctx.createLinearGradient(
+              sCanvas.cx,
+              sCanvas.cy,
+              sCanvas.cx + tailLen,
+              sCanvas.cy + Math.sin(animationPhase * 2) * 6
+            );
+            tailGrad.addColorStop(0, 'rgba(56, 189, 248, 0.75)');
+            tailGrad.addColorStop(0.3, 'rgba(99, 102, 241, 0.45)');
+            tailGrad.addColorStop(0.7, 'rgba(168, 85, 247, 0.2)');
+            tailGrad.addColorStop(1, 'rgba(168, 85, 247, 0)');
+
+            ctx.fillStyle = tailGrad;
+            ctx.beginPath();
+            ctx.moveTo(sCanvas.cx, sCanvas.cy - 7);
+            ctx.lineTo(sCanvas.cx + tailLen, sCanvas.cy - 18);
+            ctx.lineTo(sCanvas.cx + tailLen, sCanvas.cy + 18);
+            ctx.lineTo(sCanvas.cx, sCanvas.cy + 7);
+            ctx.closePath();
+            ctx.fill();
+
+            // Dust tail (curved)
+            const dustGrad = ctx.createLinearGradient(
+              sCanvas.cx,
+              sCanvas.cy,
+              sCanvas.cx + tailLen * 0.75,
+              sCanvas.cy + tailLen * 0.4
+            );
+            dustGrad.addColorStop(0, 'rgba(253, 230, 138, 0.6)');
+            dustGrad.addColorStop(1, 'rgba(253, 230, 138, 0)');
+            ctx.fillStyle = dustGrad;
+            ctx.beginPath();
+            ctx.moveTo(sCanvas.cx, sCanvas.cy - 4);
+            ctx.quadraticCurveTo(
+              sCanvas.cx + tailLen * 0.4,
+              sCanvas.cy + tailLen * 0.1,
+              sCanvas.cx + tailLen * 0.75,
+              sCanvas.cy + tailLen * 0.4
+            );
+            ctx.lineTo(sCanvas.cx + tailLen * 0.7, sCanvas.cy + tailLen * 0.48);
+            ctx.quadraticCurveTo(
+              sCanvas.cx + tailLen * 0.35,
+              sCanvas.cy + tailLen * 0.15,
+              sCanvas.cx,
+              sCanvas.cy + 4
+            );
+            ctx.closePath();
+            ctx.fill();
+
+            // Coma halo
+            const comaGrad = ctx.createRadialGradient(
+              sCanvas.cx,
+              sCanvas.cy,
+              2,
+              sCanvas.cx,
+              sCanvas.cy,
+              18 + gasActivity * 3
+            );
+            comaGrad.addColorStop(0, '#ffffff');
+            comaGrad.addColorStop(0.3, 'rgba(103, 232, 249, 0.8)');
+            comaGrad.addColorStop(0.7, 'rgba(56, 189, 248, 0.3)');
+            comaGrad.addColorStop(1, 'rgba(56, 189, 248, 0)');
+            ctx.fillStyle = comaGrad;
+            ctx.beginPath();
+            ctx.arc(sCanvas.cx, sCanvas.cy, 18 + gasActivity * 3, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Nucleus
+            ctx.fillStyle = '#f8fafc';
+            ctx.beginPath();
+            ctx.arc(sCanvas.cx, sCanvas.cy, 6, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#06b6d4';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+
+            // Label
+            ctx.fillStyle = '#38bdf8';
+            ctx.font = 'bold 10px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(s.name, sCanvas.cx, sCanvas.cy + 22);
+            continue;
+          }
+
+          // Handle Aura Glow
+          const isHovered = draggedSourceId === s.id;
+          ctx.fillStyle = isHovered
+            ? 'rgba(255, 255, 255, 0.2)'
+            : s.type === 'monopole_n'
+            ? 'rgba(239, 68, 68, 0.25)'
+            : s.type === 'monopole_s'
+            ? 'rgba(59, 130, 246, 0.25)'
+            : 'rgba(168, 85, 247, 0.25)';
           ctx.beginPath();
-          ctx.arc(earthCanvas.cx, earthCanvas.cy, s.orbitRadius * zoom, 0, Math.PI * 2);
+          ctx.arc(sCanvas.cx, sCanvas.cy, 18, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Main Source Node
+          ctx.fillStyle = s.type === 'monopole_n' ? '#ef4444' : s.type === 'monopole_s' ? '#3b82f6' : '#a855f7';
+          ctx.beginPath();
+          ctx.arc(sCanvas.cx, sCanvas.cy, 10, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 2.0;
+          ctx.stroke();
+
+          // Label
+          ctx.fillStyle = '#ffffff';
+          ctx.font = 'bold 10px monospace';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          const labelText = s.type === 'monopole_n' ? 'N' : s.type === 'monopole_s' ? 'S' : 'M';
+          ctx.fillText(labelText, sCanvas.cx, sCanvas.cy);
+
+          ctx.fillStyle = '#cbd5e1';
+          ctx.font = '10px sans-serif';
+          ctx.fillText(`${s.name} (${s.strength}q)`, sCanvas.cx, sCanvas.cy + 18);
+        }
+        ctx.restore();
+      }
+
+      // 12. Render Moon Body, Lunar Orbit, and Solid Earth Tidal Bulge
+      if (moonConfig?.enabled) {
+        const moonAngleRad = (moonConfig.phaseAngleDeg * Math.PI) / 180;
+        const moonDist = moonConfig.orbitRadius ?? 3.5;
+        const moonX = earthConfig.x + Math.cos(moonAngleRad) * moonDist;
+        const moonY = earthConfig.y + Math.sin(moonAngleRad) * moonDist;
+        const moonCanvas = worldToCanvas(moonX, moonY, width, height);
+        const moonRadiusPx = Math.max(8, (moonConfig.radius ?? 0.26) * zoom);
+
+        // A. Orbit Path Ring
+        if (currentLayers.moonOrbit && moonConfig.showOrbit !== false) {
+          ctx.save();
+          ctx.strokeStyle = 'rgba(148, 163, 184, 0.35)';
+          ctx.setLineDash([4, 4]);
+          ctx.lineWidth = 1.2;
+          ctx.beginPath();
+          ctx.arc(earthCanvas.cx, earthCanvas.cy, moonDist * zoom, 0, Math.PI * 2);
           ctx.stroke();
           ctx.setLineDash([]);
+
+          // Orbit Distance Tag
+          const tagX = earthCanvas.cx + Math.cos(moonAngleRad + 0.25) * (moonDist * zoom);
+          const tagY = earthCanvas.cy + Math.sin(moonAngleRad + 0.25) * (moonDist * zoom);
+          ctx.fillStyle = '#94a3b8';
+          ctx.font = '9px monospace';
+          ctx.fillText('Lunar Orbit (r = 384,400 km)', tagX, tagY);
+          ctx.restore();
         }
 
-        // Handle Aura Glow
-        const isHovered = draggedSourceId === s.id;
-        ctx.fillStyle = isHovered
-          ? 'rgba(255, 255, 255, 0.2)'
-          : s.type === 'monopole_n'
-          ? 'rgba(239, 68, 68, 0.25)'
-          : s.type === 'monopole_s'
-          ? 'rgba(59, 130, 246, 0.25)'
-          : 'rgba(168, 85, 247, 0.25)';
-        ctx.beginPath();
-        ctx.arc(sCanvas.cx, sCanvas.cy, 18, 0, Math.PI * 2);
-        ctx.fill();
+        // B. Solid Earth Tidal Bulge on Earth's Crust
+        if (currentLayers.lunarTideBulge && moonConfig.showTidalBulge !== false) {
+          ctx.save();
+          const tidalWeight = moonConfig.tidalStressWeight ?? 0.25;
+          const earthRadiusPx = earthConfig.radius * zoom;
+          const bulgeOffsetPx = earthRadiusPx * 0.12 * (tidalWeight / 0.25);
 
-        // Main Source Node
-        ctx.fillStyle = s.type === 'monopole_n' ? '#ef4444' : s.type === 'monopole_s' ? '#3b82f6' : '#a855f7';
+          // Tidal axis line
+          ctx.strokeStyle = 'rgba(56, 189, 248, 0.35)';
+          ctx.setLineDash([2, 4]);
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.moveTo(
+            earthCanvas.cx - Math.cos(moonAngleRad) * (earthRadiusPx + bulgeOffsetPx * 1.5),
+            earthCanvas.cy + Math.sin(moonAngleRad) * (earthRadiusPx + bulgeOffsetPx * 1.5)
+          );
+          ctx.lineTo(
+            earthCanvas.cx + Math.cos(moonAngleRad) * (earthRadiusPx + bulgeOffsetPx * 1.5),
+            earthCanvas.cy - Math.sin(moonAngleRad) * (earthRadiusPx + bulgeOffsetPx * 1.5)
+          );
+          ctx.stroke();
+          ctx.setLineDash([]);
+
+          // Tidal Ellipsoid Bulge Contour
+          ctx.strokeStyle = 'rgba(56, 189, 248, 0.65)';
+          ctx.fillStyle = 'rgba(56, 189, 248, 0.08)';
+          ctx.lineWidth = 1.8;
+          ctx.beginPath();
+          ctx.ellipse(
+            earthCanvas.cx,
+            earthCanvas.cy,
+            earthRadiusPx + bulgeOffsetPx,
+            earthRadiusPx - bulgeOffsetPx * 0.5,
+            -moonAngleRad,
+            0,
+            Math.PI * 2
+          );
+          ctx.fill();
+          ctx.stroke();
+
+          // Bulge arrow labels
+          ctx.fillStyle = '#38bdf8';
+          ctx.font = '9px monospace';
+          ctx.textAlign = 'center';
+          const subLunarX = earthCanvas.cx + Math.cos(moonAngleRad) * (earthRadiusPx + bulgeOffsetPx + 12);
+          const subLunarY = earthCanvas.cy - Math.sin(moonAngleRad) * (earthRadiusPx + bulgeOffsetPx + 12);
+          ctx.fillText('Sub-Lunar Bulge (기조력 최대)', subLunarX, subLunarY);
+          ctx.restore();
+        }
+
+        // C. Moon Plasma Wake Cavity in Solar Wind
+        if (solarWind.enabled) {
+          ctx.save();
+          const wakeLen = 1.6 * zoom;
+          const grad = ctx.createLinearGradient(
+            moonCanvas.cx,
+            moonCanvas.cy,
+            moonCanvas.cx + wakeLen,
+            moonCanvas.cy
+          );
+          grad.addColorStop(0, 'rgba(30, 41, 59, 0.6)');
+          grad.addColorStop(1, 'rgba(30, 41, 59, 0.0)');
+          ctx.fillStyle = grad;
+          ctx.beginPath();
+          ctx.moveTo(moonCanvas.cx, moonCanvas.cy - moonRadiusPx * 0.9);
+          ctx.lineTo(moonCanvas.cx + wakeLen, moonCanvas.cy - moonRadiusPx * 1.4);
+          ctx.lineTo(moonCanvas.cx + wakeLen, moonCanvas.cy + moonRadiusPx * 1.4);
+          ctx.lineTo(moonCanvas.cx, moonCanvas.cy + moonRadiusPx * 0.9);
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+        }
+
+        // D. Moon Celestial Body
+        if (currentLayers.moonBody) {
+          ctx.save();
+          // Halo glow
+          ctx.fillStyle = isDraggingMoon ? 'rgba(255, 255, 255, 0.35)' : 'rgba(203, 213, 225, 0.2)';
+          ctx.beginPath();
+          ctx.arc(moonCanvas.cx, moonCanvas.cy, moonRadiusPx + 4, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Moon body base (silvery gray with subtle radial gradient)
+          const moonGrad = ctx.createRadialGradient(
+            moonCanvas.cx - moonRadiusPx * 0.3,
+            moonCanvas.cy - moonRadiusPx * 0.3,
+            moonRadiusPx * 0.1,
+            moonCanvas.cx,
+            moonCanvas.cy,
+            moonRadiusPx
+          );
+          moonGrad.addColorStop(0, '#f1f5f9');
+          moonGrad.addColorStop(0.5, '#cbd5e1');
+          moonGrad.addColorStop(0.85, '#94a3b8');
+          moonGrad.addColorStop(1, '#64748b');
+
+          ctx.fillStyle = moonGrad;
+          ctx.beginPath();
+          ctx.arc(moonCanvas.cx, moonCanvas.cy, moonRadiusPx, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Lunar Maria / Crater dark spots
+          ctx.fillStyle = 'rgba(51, 65, 85, 0.45)';
+          // Oceanus Procellarum / Mare Imbrium
+          ctx.beginPath();
+          ctx.arc(moonCanvas.cx - moonRadiusPx * 0.25, moonCanvas.cy - moonRadiusPx * 0.15, moonRadiusPx * 0.32, 0, Math.PI * 2);
+          ctx.fill();
+          // Mare Serenitatis / Tranquillitatis
+          ctx.beginPath();
+          ctx.arc(moonCanvas.cx + moonRadiusPx * 0.15, moonCanvas.cy - moonRadiusPx * 0.2, moonRadiusPx * 0.26, 0, Math.PI * 2);
+          ctx.fill();
+          // Mare Crisium
+          ctx.beginPath();
+          ctx.arc(moonCanvas.cx + moonRadiusPx * 0.38, moonCanvas.cy + moonRadiusPx * 0.1, moonRadiusPx * 0.16, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Moon border
+          ctx.strokeStyle = '#e2e8f0';
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.arc(moonCanvas.cx, moonCanvas.cy, moonRadiusPx, 0, Math.PI * 2);
+          ctx.stroke();
+
+          // Remanent Crustal Dipole Vector arrow
+          if (moonConfig.remanentMoment && moonConfig.remanentMoment > 0.01) {
+            const remAngle = ((moonConfig.remanentAngle ?? 15) * Math.PI) / 180;
+            const arrowLen = moonRadiusPx * 1.6;
+            const dx = Math.cos(remAngle) * arrowLen;
+            const dy = -Math.sin(remAngle) * arrowLen;
+            ctx.strokeStyle = '#f43f5e';
+            ctx.lineWidth = 1.8;
+            ctx.beginPath();
+            ctx.moveTo(moonCanvas.cx - dx * 0.5, moonCanvas.cy - dy * 0.5);
+            ctx.lineTo(moonCanvas.cx + dx * 0.5, moonCanvas.cy + dy * 0.5);
+            ctx.stroke();
+            // Arrowhead
+            ctx.fillStyle = '#f43f5e';
+            ctx.beginPath();
+            ctx.arc(moonCanvas.cx + dx * 0.5, moonCanvas.cy + dy * 0.5, 2.5, 0, Math.PI * 2);
+            ctx.fill();
+          }
+
+          // Moon Label & Phase info
+          ctx.fillStyle = '#ffffff';
+          ctx.font = 'bold 10px monospace';
+          ctx.textAlign = 'center';
+          ctx.fillText('MOON (달)', moonCanvas.cx, moonCanvas.cy + moonRadiusPx + 14);
+
+          ctx.fillStyle = '#94a3b8';
+          ctx.font = '9px sans-serif';
+          const phaseName =
+            Math.abs(moonConfig.phaseAngleDeg - 0) < 20
+              ? '신월 (New Moon)'
+              : Math.abs(moonConfig.phaseAngleDeg - 90) < 20
+              ? '상현 (First Qtr)'
+              : Math.abs(moonConfig.phaseAngleDeg - 180) < 20
+              ? '보름달 (Full Moon)'
+              : Math.abs(moonConfig.phaseAngleDeg - 270) < 20
+              ? '하현 (Third Qtr)'
+              : `${Math.round(moonConfig.phaseAngleDeg)}°`;
+          ctx.fillText(
+            `위상: ${phaseName} | 기조력 ${(moonConfig.tidalStressWeight ?? 0.25).toFixed(2)}`,
+            moonCanvas.cx,
+            moonCanvas.cy + moonRadiusPx + 26
+          );
+          ctx.restore();
+        }
+      }
+
+      // Render right-click probe marker target on canvas if active
+      if (probeInfo && currentLayers.probeMarker) {
+        const probeCanvas = worldToCanvas(probeInfo.worldX, probeInfo.worldY, canvas.width, canvas.height);
+        ctx.save();
+        ctx.strokeStyle = '#22d3ee';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([2, 2]);
         ctx.beginPath();
-        ctx.arc(sCanvas.cx, sCanvas.cy, 10, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 2.0;
+        ctx.arc(probeCanvas.cx, probeCanvas.cy, 12, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Crosshairs
+        ctx.strokeStyle = 'rgba(34, 211, 238, 0.85)';
+        ctx.lineWidth = 1.0;
+        ctx.beginPath();
+        ctx.moveTo(probeCanvas.cx - 16, probeCanvas.cy);
+        ctx.lineTo(probeCanvas.cx + 16, probeCanvas.cy);
+        ctx.moveTo(probeCanvas.cx, probeCanvas.cy - 16);
+        ctx.lineTo(probeCanvas.cx, probeCanvas.cy + 16);
         ctx.stroke();
 
-        // Label
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 10px monospace';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        const labelText = s.type === 'monopole_n' ? 'N' : s.type === 'monopole_s' ? 'S' : 'M';
-        ctx.fillText(labelText, sCanvas.cx, sCanvas.cy);
-
-        ctx.fillStyle = '#cbd5e1';
-        ctx.font = '10px sans-serif';
-        ctx.fillText(`${s.name} (${s.strength}q)`, sCanvas.cx, sCanvas.cy + 18);
+        // Center dot
+        ctx.fillStyle = '#06b6d4';
+        ctx.beginPath();
+        ctx.arc(probeCanvas.cx, probeCanvas.cy, 3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
       }
+
       ctx.restore();
 
       animationFrameId = requestAnimationFrame(render);
@@ -995,6 +1381,7 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
     zoom,
     animationPhase,
     onEarthquakeTriggered,
+    probeInfo,
   ]);
 
   // Handle Canvas Resize
@@ -1017,6 +1404,9 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
 
   // Mouse Interaction Handlers
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    // Only handle dragging/panning on primary (left) button click
+    if (e.button !== 0) return;
+
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
@@ -1034,6 +1424,19 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
       }
     }
 
+    // Check if clicked Moon
+    if (moonConfig?.enabled) {
+      const moonAngleRad = (moonConfig.phaseAngleDeg * Math.PI) / 180;
+      const moonDist = moonConfig.orbitRadius ?? 3.5;
+      const moonX = earthConfig.x + Math.cos(moonAngleRad) * moonDist;
+      const moonY = earthConfig.y + Math.sin(moonAngleRad) * moonDist;
+      const distMoon = Math.hypot(moonX - world.wx, moonY - world.wy);
+      if (distMoon < Math.max(0.35, (moonConfig.radius ?? 0.26) * 1.5)) {
+        setIsDraggingMoon(true);
+        return;
+      }
+    }
+
     // Check if clicked Earth
     const distEarth = Math.hypot(earthConfig.x - world.wx, earthConfig.y - world.wy);
     if (distEarth < earthConfig.radius * 1.1) {
@@ -1046,7 +1449,9 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
     setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
   };
 
-  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  // Right-Click Context Menu Handler: Vector Probe & Hotspot Inspector
+  const handleContextMenu = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    e.preventDefault(); // Prevent standard browser context menu
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
@@ -1054,9 +1459,9 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
     const clientY = e.clientY - rect.top;
     const world = canvasToWorld(clientX, clientY, canvas.width, canvas.height);
 
-    // Update hover HUD state
-    const field = computeTotalMagneticField(world.wx, world.wy, earthConfig, sources, solarWind);
-    const grad = computeFieldGradient(world.wx, world.wy, earthConfig, sources, solarWind);
+    // Compute magnetic field and gradient at the right-clicked coordinate
+    const field = computeTotalMagneticField(world.wx, world.wy, earthConfig, sources, solarWind, moonConfig);
+    const grad = computeFieldGradient(world.wx, world.wy, earthConfig, sources, solarWind, moonConfig);
     const interf = computeInterferenceIntensity(
       world.wx,
       world.wy,
@@ -1091,7 +1496,7 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
       }
     }
 
-    setHoverInfo({
+    setProbeInfo({
       x: clientX,
       y: clientY,
       worldX: world.wx,
@@ -1105,12 +1510,35 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
       hotspotMask: mask,
       waveCloudDensity: waveData.density,
     });
+  };
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const clientX = e.clientX - rect.left;
+    const clientY = e.clientY - rect.top;
+    const world = canvasToWorld(clientX, clientY, canvas.width, canvas.height);
 
     // Handle entity dragging
     if (draggedSourceId) {
       setSources((prev) =>
         prev.map((s) => (s.id === draggedSourceId ? { ...s, x: world.wx, y: world.wy, orbiting: false } : s))
       );
+      return;
+    }
+
+    if (isDraggingMoon && moonConfig && setMoonConfig) {
+      const dx = world.wx - earthConfig.x;
+      const dy = world.wy - earthConfig.y;
+      const newAngleDeg = ((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 360;
+      const newRadius = Math.max(1.8, Math.min(6.5, Math.hypot(dx, dy)));
+      setMoonConfig((prev) => ({
+        ...prev,
+        phaseAngleDeg: Number(newAngleDeg.toFixed(1)),
+        orbitRadius: Number(newRadius.toFixed(2)),
+        autoOrbit: false,
+      }));
       return;
     }
 
@@ -1130,15 +1558,39 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
 
   const handleMouseUp = () => {
     setDraggedSourceId(null);
+    setIsDraggingMoon(false);
     setIsDraggingEarth(false);
     setIsPanning(false);
   };
 
-  const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    const zoomFactor = e.deltaY < 0 ? 1.12 : 0.89;
-    setZoom((prev) => Math.max(25, Math.min(220, prev * zoomFactor)));
-  };
+  // Native non-passive wheel listener to strictly isolate zoom and prevent outer window scrolling
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const container = containerRef.current;
+
+    const onWheelNative = (e: WheelEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const zoomFactor = e.deltaY < 0 ? 1.12 : 0.89;
+      setZoom((prev) => Math.max(25, Math.min(220, prev * zoomFactor)));
+    };
+
+    if (canvas) {
+      canvas.addEventListener('wheel', onWheelNative, { passive: false });
+    }
+    if (container) {
+      container.addEventListener('wheel', onWheelNative, { passive: false });
+    }
+
+    return () => {
+      if (canvas) {
+        canvas.removeEventListener('wheel', onWheelNative);
+      }
+      if (container) {
+        container.removeEventListener('wheel', onWheelNative);
+      }
+    };
+  }, [cloudConfig.perspectiveMode, cloudConfig.inspectionMode]);
 
   const resetView = () => {
     setZoom(75);
@@ -1448,6 +1900,14 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
         </div>
       </div>
 
+      {/* Top-Right Floating Visual Elements & Layer Controller Panel */}
+      <div className="absolute top-12 right-2.5 z-30 pointer-events-auto">
+        <VisualElementsGuidePanel
+          layerVisibility={currentLayers}
+          setLayerVisibility={updateLayers}
+        />
+      </div>
+
       {/* Main Canvas Element */}
       <canvas
         ref={canvasRef}
@@ -1455,12 +1915,12 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
-        onWheel={handleWheel}
+        onContextMenu={handleContextMenu}
         className="w-full h-full cursor-grab active:cursor-grabbing block"
       />
 
       {/* Floating Bottom HUD Overlay - High Density Monospace */}
-      <div className="absolute bottom-2.5 left-2.5 z-20 flex items-center gap-2.5 px-2.5 py-1 bg-[#0e0e13]/90 backdrop-blur-md rounded border border-[#1e1e24] text-[10px] font-mono text-slate-300 shadow-xl pointer-events-none">
+      <div className="absolute bottom-2.5 left-2.5 z-20 flex items-center gap-2.5 px-2.5 py-1 bg-[#0e0e13]/90 backdrop-blur-md rounded border border-[#1e1e24] text-[10px] font-mono text-slate-300 shadow-xl pointer-events-none flex-wrap">
         <div className="flex items-center gap-1.5">
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
           <span className="text-emerald-400 font-bold">{fps} FPS</span>
@@ -1482,47 +1942,80 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
             </div>
           </>
         )}
+        {cloudConfig.weatherData && (
+          <>
+            <div className="w-px h-3 bg-[#262632]" />
+            <div className="text-cyan-300 flex items-center gap-1">
+              <Wind className="w-3 h-3 text-cyan-400" />
+              WIND (u,v): <span className="font-bold text-white">({cloudConfig.weatherData.windU}, {cloudConfig.weatherData.windV}) m/s</span>
+            </div>
+            <div className="w-px h-3 bg-[#262632] hidden md:block" />
+            <div className="text-rose-300 hidden md:flex items-center gap-1">
+              <Zap className="w-3 h-3 text-rose-400" />
+              Kp: <span className="font-bold text-white">{cloudConfig.weatherData.kpIndex.toFixed(1)}</span>
+            </div>
+          </>
+        )}
         <div className="w-px h-3 bg-[#262632] hidden sm:block" />
-        <div className="text-slate-500 hidden sm:block">
-          Interactive RK4 Field Tracer
+        <div className="text-cyan-400/80 hidden sm:flex items-center gap-1">
+          <span>우클릭: 지점 정밀 프로브 측정</span>
         </div>
       </div>
 
-      {/* Hover Inspector Tooltip - High Density */}
-      {hoverInfo && (
+      {/* Right-Click Vector Probe & Hotspot Inspector Tooltip */}
+      {probeInfo && (
         <div
-          className="absolute z-30 pointer-events-none p-2 bg-[#0f0f15]/98 backdrop-blur-md rounded border border-[#2c2c3e] shadow-2xl text-[10px] font-mono text-slate-200 min-w-[210px]"
+          className="absolute z-30 pointer-events-auto p-2.5 bg-[#0f0f15]/98 backdrop-blur-md rounded-lg border border-cyan-500/40 shadow-2xl text-[10px] font-mono text-slate-200 min-w-[225px] select-text"
           style={{
-            left: Math.min(hoverInfo.x + 14, (containerRef.current?.clientWidth || 800) - 230),
-            top: Math.min(hoverInfo.y + 14, (containerRef.current?.clientHeight || 600) - 190),
+            left: Math.min(probeInfo.x + 14, (containerRef.current?.clientWidth || 800) - 245),
+            top: Math.min(probeInfo.y + 14, (containerRef.current?.clientHeight || 600) - 210),
           }}
         >
-          <div className="text-cyan-400 font-bold mb-1 flex items-center gap-1 border-b border-[#222230] pb-0.5">
-            <Info className="w-3 h-3" /> VECTOR PROBE & HOTSPOT
+          <div className="text-cyan-400 font-bold mb-1.5 flex items-center justify-between border-b border-[#222230] pb-1">
+            <div className="flex items-center gap-1.5">
+              <Info className="w-3.5 h-3.5 text-cyan-400" />
+              <span>VECTOR PROBE & HOTSPOT</span>
+            </div>
+            <button
+              onClick={() => setProbeInfo(null)}
+              className="p-0.5 text-slate-400 hover:text-white hover:bg-[#222232] rounded transition-colors"
+              title="Close Probe"
+            >
+              <X className="w-3 h-3" />
+            </button>
           </div>
           <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-slate-300">
             <span className="text-slate-500">Coord (x, y):</span>
-            <span className="text-right">({hoverInfo.worldX.toFixed(2)}, {hoverInfo.worldY.toFixed(2)})</span>
+            <span className="text-right font-semibold">({probeInfo.worldX.toFixed(2)}, {probeInfo.worldY.toFixed(2)})</span>
             <span className="text-slate-500">|B_total|:</span>
-            <span className="text-right text-emerald-400 font-bold">{hoverInfo.bMag.toFixed(3)} T</span>
+            <span className="text-right text-emerald-400 font-bold">{probeInfo.bMag.toFixed(3)} T</span>
             <span className="text-slate-500">(Bx, By):</span>
-            <span className="text-right">({hoverInfo.bx.toFixed(2)}, {hoverInfo.by.toFixed(2)})</span>
+            <span className="text-right">({probeInfo.bx.toFixed(2)}, {probeInfo.by.toFixed(2)})</span>
             <span className="text-slate-500">∇|B|:</span>
-            <span className="text-right text-purple-400">{hoverInfo.gradMag.toFixed(3)}</span>
+            <span className="text-right text-purple-400">{probeInfo.gradMag.toFixed(3)}</span>
             <span className="text-slate-500">Interference I:</span>
-            <span className="text-right text-sky-400 font-semibold">{hoverInfo.interference.toFixed(3)}</span>
+            <span className="text-right text-sky-400 font-semibold">{probeInfo.interference.toFixed(3)}</span>
             <span className="text-slate-500">Mask M(x,y):</span>
-            <span className={`text-right font-bold ${hoverInfo.hotspotMask > 0.5 ? 'text-pink-400' : 'text-slate-400'}`}>
-              {(hoverInfo.hotspotMask * 100).toFixed(0)}%
+            <span className={`text-right font-bold ${probeInfo.hotspotMask > 0.5 ? 'text-pink-400' : 'text-slate-400'}`}>
+              {(probeInfo.hotspotMask * 100).toFixed(0)}%
             </span>
             <span className="text-slate-500">Wave Cloud C:</span>
-            <span className="text-right text-cyan-300 font-bold">{hoverInfo.waveCloudDensity.toFixed(3)}</span>
-            {hoverInfo.stressVal > 0 && (
+            <span className="text-right text-cyan-300 font-bold">{probeInfo.waveCloudDensity.toFixed(3)}</span>
+            {probeInfo.stressVal > 0 && (
               <>
                 <span className="text-slate-500">Crust Stress:</span>
-                <span className="text-right text-amber-400 font-bold">{(hoverInfo.stressVal * 100).toFixed(1)}%</span>
+                <span className="text-right text-amber-400 font-bold">{(probeInfo.stressVal * 100).toFixed(1)}%</span>
               </>
             )}
+          </div>
+          <div className="mt-1.5 pt-1 border-t border-[#1e1e28] text-[9px] text-slate-500 flex items-center justify-between">
+            <span>우클릭: 다른 지점 측정</span>
+            <button
+              onClick={() => setProbeInfo(null)}
+              className="text-cyan-400 hover:underline"
+            >
+              닫기
+            </button>
           </div>
         </div>
       )}

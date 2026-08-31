@@ -222,6 +222,7 @@ export const Magnetosphere3DView: React.FC<Magnetosphere3DViewProps> = ({
 
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
+      e.stopPropagation();
       cameraAngle.radius = Math.max(4, Math.min(28, cameraAngle.radius + e.deltaY * 0.015));
       updateCameraPosition();
     };

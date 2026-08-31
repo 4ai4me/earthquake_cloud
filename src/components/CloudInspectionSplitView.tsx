@@ -11,6 +11,7 @@ import {
   computeInterferenceIntensity,
   computeHotspotMask,
   computeWaveCloudDensity,
+  computeNaturalWeatherCloudDensity,
   applyCloudGamma,
   getInspectionCloudColor,
 } from '../physics/magneticEngine';
@@ -43,6 +44,18 @@ export function CloudInspectionSplitView({
   const canvas1Ref = useRef<HTMLCanvasElement | null>(null);
   const canvas2Ref = useRef<HTMLCanvasElement | null>(null);
   const canvas3Ref = useRef<HTMLCanvasElement | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  // Wheel isolation
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const preventScroll = (e: WheelEvent) => {
+      e.stopPropagation();
+    };
+    el.addEventListener('wheel', preventScroll, { passive: true });
+    return () => el.removeEventListener('wheel', preventScroll);
+  }, []);
 
   const [gamma, setGamma] = useState<number>(cloudConfig.gamma ?? 0.6);
   const [streamlineAlpha, setStreamlineAlpha] = useState<number>(
@@ -116,9 +129,12 @@ export function CloudInspectionSplitView({
             animPhase
           );
 
-          // [View 1] Pure Cloud Pattern with Gamma
-          if (waveData.density > 0.01) {
-            const visDensity = applyCloudGamma(waveData.density, gamma);
+          // [View 1] Pure Cloud Pattern with Gamma (Natural Weather Background + Stimulated Wave Cloud)
+          const naturalDensity = computeNaturalWeatherCloudDensity(wx, wy, cloudConfig.weatherData, animPhase);
+          const totalCloudDensity = Math.max(waveData.density, naturalDensity * 0.65);
+
+          if (totalCloudDensity > 0.01) {
+            const visDensity = applyCloudGamma(totalCloudDensity, gamma);
             ctx1.fillStyle = getInspectionCloudColor(visDensity, 'satellite_bone', visDensity * 0.95);
             ctx1.fillRect(px, py, step, step);
           }
@@ -148,8 +164,8 @@ export function CloudInspectionSplitView({
           }
 
           // [View 3] Cloud Base for Vector Overlay
-          if (waveData.density > 0.01) {
-            const visDensity = applyCloudGamma(waveData.density, gamma);
+          if (totalCloudDensity > 0.01) {
+            const visDensity = applyCloudGamma(totalCloudDensity, gamma);
             ctx3.fillStyle = getInspectionCloudColor(visDensity, 'satellite_bone', visDensity * 0.85);
             ctx3.fillRect(px, py, step, step);
           }
@@ -222,7 +238,7 @@ export function CloudInspectionSplitView({
   }, [earthConfig, sources, solarWind, cloudConfig, gamma, streamlineAlpha, resolution]);
 
   return (
-    <div className="w-full h-full flex flex-col bg-[#07070a] rounded-lg overflow-hidden border border-[#1e1e24] text-slate-200">
+    <div ref={containerRef} className="w-full h-full flex flex-col bg-[#07070a] rounded-lg overflow-hidden border border-[#1e1e24] text-slate-200">
       {/* Top Header */}
       <div className="p-3 bg-[#0f0f14] border-b border-[#1e1e24] flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">

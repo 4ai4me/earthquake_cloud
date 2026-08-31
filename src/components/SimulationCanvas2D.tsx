@@ -17,9 +17,13 @@ import {
   computeInterferenceIntensity,
   computeHotspotMask,
   computeWaveCloudDensity,
+  applyCloudGamma,
+  getInspectionCloudColor,
 } from '../physics/magneticEngine';
 import { CloudParticleSystem } from '../physics/cloudParticleEngine';
 import { CrustalStressManager, SeismicWave } from '../physics/crustalStressEngine';
+import { GroundSkyDomeView } from './GroundSkyDomeView';
+import { CloudInspectionSplitView } from './CloudInspectionSplitView';
 import {
   Eye,
   Layers,
@@ -37,6 +41,10 @@ import {
   Flame,
   Info,
   Waves,
+  Sparkles,
+  Compass,
+  Columns,
+  Sliders,
 } from 'lucide-react';
 
 interface SimulationCanvas2DProps {
@@ -66,7 +74,9 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
   sources,
   setSources,
   solarWind,
+  setSolarWind,
   cloudConfig,
+  setCloudConfig,
   stressManager,
   particleSystem,
   onEarthquakeTriggered,
@@ -223,6 +233,124 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
 
       const width = canvas.width;
       const height = canvas.height;
+
+      // Check for Dedicated Isolated Inspection View Modes (Cloud Only, Hotspot Mask, Cloud+Vector)
+      const isInspectionMode =
+        cloudConfig.inspectionMode &&
+        cloudConfig.inspectionMode !== 'none' &&
+        cloudConfig.inspectionMode !== 'split_3view';
+
+      if (isInspectionMode) {
+        // Deep Space Black background
+        ctx.fillStyle = '#050508';
+        ctx.fillRect(0, 0, width, height);
+
+        const step = cloudConfig.highResGrid !== false ? 4 : 8;
+        const currentGamma = cloudConfig.gamma ?? 0.6;
+        const palette = cloudConfig.colorPalette ?? 'satellite_bone';
+
+        for (let py = 0; py < height; py += step) {
+          for (let px = 0; px < width; px += step) {
+            const worldPos = canvasToWorld(px + step / 2, py + step / 2, width, height);
+            const waveData = computeWaveCloudDensity(
+              worldPos.wx,
+              worldPos.wy,
+              earthConfig,
+              sources,
+              solarWind,
+              cloudConfig,
+              animationPhase
+            );
+
+            if (cloudConfig.inspectionMode === 'cloud_density' || cloudConfig.inspectionMode === 'cloud_vector_overlay') {
+              if (waveData.density > 0.01) {
+                const visDensity = applyCloudGamma(waveData.density, currentGamma);
+                ctx.fillStyle = getInspectionCloudColor(visDensity, palette, visDensity * 0.95);
+                ctx.fillRect(px, py, step, step);
+              }
+            } else if (cloudConfig.inspectionMode === 'hotspot_mask') {
+              if (waveData.mask > 0.02) {
+                const m = Math.min(1.0, waveData.mask);
+                let r = 0, g = 0, b = 0;
+                if (m < 0.33) {
+                  const t = m / 0.33;
+                  r = Math.round(80 * t);
+                  b = Math.round(150 * t);
+                } else if (m < 0.66) {
+                  const t = (m - 0.33) / 0.33;
+                  r = Math.round(80 + 175 * t);
+                  g = Math.round(60 * t);
+                  b = Math.round(150 * (1 - t));
+                } else {
+                  const t = (m - 0.66) / 0.34;
+                  r = 255;
+                  g = Math.round(60 + 195 * t);
+                  b = Math.round(80 * t);
+                }
+                ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${Math.min(1.0, m * 0.95)})`;
+                ctx.fillRect(px, py, step, step);
+              }
+            }
+          }
+        }
+
+        // Low-alpha thin streamlines overlay for cloud_vector_overlay mode
+        if (cloudConfig.inspectionMode === 'cloud_vector_overlay') {
+          const numLines = 28;
+          const seedPoints: { x: number; y: number }[] = [];
+          const earthR = earthConfig.radius;
+          for (let i = 0; i < numLines; i++) {
+            const ang = (i / numLines) * Math.PI * 2;
+            seedPoints.push({
+              x: earthConfig.x + (earthR + 0.15) * Math.cos(ang),
+              y: earthConfig.y + (earthR + 0.15) * Math.sin(ang),
+            });
+          }
+
+          ctx.strokeStyle = `rgba(56, 189, 248, ${cloudConfig.streamlineAlpha ?? 0.35})`;
+          ctx.lineWidth = 1.0;
+
+          seedPoints.forEach((pt) => {
+            let curX = pt.x;
+            let curY = pt.y;
+            ctx.beginPath();
+            const startP = worldToCanvas(curX, curY, width, height);
+            ctx.moveTo(startP.cx, startP.cy);
+
+            for (let s = 0; s < 130; s++) {
+              const f = computeTotalMagneticField(curX, curY, earthConfig, sources, solarWind);
+              if (f.magnitude < 1e-4) break;
+              const ds = 0.08;
+              curX += (f.bx / f.magnitude) * ds;
+              curY += (f.by / f.magnitude) * ds;
+              const p = worldToCanvas(curX, curY, width, height);
+              ctx.lineTo(p.cx, p.cy);
+            }
+            ctx.stroke();
+          });
+        }
+
+        // Minimalist faint outline for Earth and external sources
+        const ep = worldToCanvas(earthConfig.x, earthConfig.y, width, height);
+        ctx.strokeStyle = 'rgba(56, 189, 248, 0.45)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(ep.cx, ep.cy, earthConfig.radius * zoom, 0, Math.PI * 2);
+        ctx.stroke();
+
+        sources.forEach((src) => {
+          if (!src.active) return;
+          const sp = worldToCanvas(src.x, src.y, width, height);
+          ctx.fillStyle = src.type === 'monopole_n' ? 'rgba(239, 68, 68, 0.7)' : 'rgba(59, 130, 246, 0.7)';
+          ctx.beginPath();
+          ctx.arc(sp.cx, sp.cy, 4, 0, Math.PI * 2);
+          ctx.fill();
+        });
+
+        // Request next frame and return early for inspection mode
+        animationFrameId = requestAnimationFrame(render);
+        return;
+      }
 
       // Clear Canvas Background (Deep Cosmic Slate)
       ctx.fillStyle = '#030712'; // Tailwind gray-950
@@ -1018,64 +1146,253 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
     setEarthConfig((prev) => ({ ...prev, x: 0, y: 0 }));
   };
 
+  // Handle Conditional View Rendering for Perspective Modes
+  if (cloudConfig.perspectiveMode === 'ground_sky') {
+    return (
+      <div className="relative w-full h-full min-h-[520px] flex flex-col bg-[#070709] rounded-lg overflow-hidden border border-[#1e1e24] shadow-2xl">
+        {/* Top Perspective Navigation */}
+        <div className="p-2 bg-[#0e0e13] border-b border-[#1e1e24] flex items-center justify-between gap-2 z-20">
+          <div className="flex items-center gap-1 p-0.5 bg-[#14141c] rounded-md border border-[#222230]">
+            <button
+              onClick={() => setCloudConfig((prev) => ({ ...prev, perspectiveMode: 'space_global' }))}
+              className="px-2.5 py-1 text-xs font-mono rounded text-slate-400 hover:text-slate-200 hover:bg-[#1e1e2c] transition-colors flex items-center gap-1.5"
+            >
+              <Eye className="w-3.5 h-3.5" />
+              우주 전역 (Space Global)
+            </button>
+            <button
+              className="px-2.5 py-1 text-xs font-mono rounded bg-cyan-950/60 text-cyan-300 border border-cyan-500/40 font-semibold flex items-center gap-1.5"
+            >
+              <Compass className="w-3.5 h-3.5 text-cyan-400" />
+              지상 관측자 하늘 (Sky Dome)
+            </button>
+            <button
+              onClick={() => {
+                setCloudConfig((prev) => ({ ...prev, perspectiveMode: 'space_global', inspectionMode: 'split_3view' }));
+              }}
+              className="px-2.5 py-1 text-xs font-mono rounded text-slate-400 hover:text-slate-200 hover:bg-[#1e1e2c] transition-colors flex items-center gap-1.5"
+            >
+              <Columns className="w-3.5 h-3.5" />
+              3분할 패턴 검증 (3-Plots)
+            </button>
+          </div>
+
+          <div className="text-[11px] font-mono text-slate-400 flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+            지상 관측 지점에서의 파동운 어안 프로젝션
+          </div>
+        </div>
+
+        <div className="flex-1 w-full overflow-hidden">
+          <GroundSkyDomeView
+            earthConfig={earthConfig}
+            sources={sources}
+            solarWind={solarWind}
+            cloudConfig={cloudConfig}
+            setCloudConfig={setCloudConfig}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  if (cloudConfig.inspectionMode === 'split_3view') {
+    return (
+      <div className="relative w-full h-full min-h-[520px] flex flex-col bg-[#070709] rounded-lg overflow-hidden border border-[#1e1e24] shadow-2xl">
+        {/* Top Perspective Navigation */}
+        <div className="p-2 bg-[#0e0e13] border-b border-[#1e1e24] flex items-center justify-between gap-2 z-20">
+          <div className="flex items-center gap-1 p-0.5 bg-[#14141c] rounded-md border border-[#222230]">
+            <button
+              onClick={() => setCloudConfig((prev) => ({ ...prev, inspectionMode: 'none', perspectiveMode: 'space_global' }))}
+              className="px-2.5 py-1 text-xs font-mono rounded text-slate-400 hover:text-slate-200 hover:bg-[#1e1e2c] transition-colors flex items-center gap-1.5"
+            >
+              <Eye className="w-3.5 h-3.5" />
+              우주 전역 (Space Global)
+            </button>
+            <button
+              onClick={() => setCloudConfig((prev) => ({ ...prev, perspectiveMode: 'ground_sky' }))}
+              className="px-2.5 py-1 text-xs font-mono rounded text-slate-400 hover:text-slate-200 hover:bg-[#1e1e2c] transition-colors flex items-center gap-1.5"
+            >
+              <Compass className="w-3.5 h-3.5" />
+              지상 관측자 하늘 (Sky Dome)
+            </button>
+            <button
+              className="px-2.5 py-1 text-xs font-mono rounded bg-emerald-950/60 text-emerald-300 border border-emerald-500/40 font-semibold flex items-center gap-1.5"
+            >
+              <Columns className="w-3.5 h-3.5 text-emerald-400" />
+              3분할 패턴 검증 (3-Plots)
+            </button>
+          </div>
+
+          <div className="text-[11px] font-mono text-slate-400 flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            수치 검증 스크립트 1:1 동기화 3-Plot 비교 화면
+          </div>
+        </div>
+
+        <div className="flex-1 w-full overflow-hidden">
+          <CloudInspectionSplitView
+            earthConfig={earthConfig}
+            sources={sources}
+            solarWind={solarWind}
+            cloudConfig={cloudConfig}
+            setCloudConfig={setCloudConfig}
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div ref={containerRef} className="relative w-full h-full min-h-[520px] bg-[#070709] rounded-lg overflow-hidden border border-[#1e1e24] shadow-2xl flex flex-col">
       {/* Top Floating Control Bar - High Density */}
       <div className="absolute top-2.5 left-2.5 right-2.5 z-20 flex flex-wrap items-center justify-between gap-2 pointer-events-none">
-        {/* Left: Mode Switchers */}
-        <div className="flex items-center gap-1 p-0.5 bg-[#0e0e13]/95 backdrop-blur-md rounded-md border border-[#1e1e24] shadow-md pointer-events-auto">
-          <button
-            id="btn-mode-streamlines"
-            onClick={() => setRenderMode('streamlines')}
-            className={`px-2.5 py-1 text-xs font-mono font-medium rounded transition-colors flex items-center gap-1.5 ${
-              renderMode === 'streamlines'
-                ? 'bg-[#1a1a26] text-cyan-300 border border-cyan-500/40 shadow-sm font-semibold'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-[#14141c]'
-            }`}
-          >
-            <Activity className="w-3.5 h-3.5 text-cyan-400" />
-            Streamlines
-          </button>
-          <button
-            id="btn-mode-heatmap"
-            onClick={() => setRenderMode('heatmap')}
-            className={`px-2.5 py-1 text-xs font-mono font-medium rounded transition-colors flex items-center gap-1.5 ${
-              renderMode === 'heatmap'
-                ? 'bg-[#1a1a26] text-purple-300 border border-purple-500/40 shadow-sm font-semibold'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-[#14141c]'
-            }`}
-          >
-            <Flame className="w-3.5 h-3.5 text-purple-400" />
-            Heatmap
-          </button>
-          <button
-            id="btn-mode-composite"
-            onClick={() => setRenderMode('composite')}
-            className={`px-2.5 py-1 text-xs font-mono font-medium rounded transition-colors flex items-center gap-1.5 ${
-              renderMode === 'composite'
-                ? 'bg-[#1a1a26] text-emerald-300 border border-emerald-500/40 shadow-sm font-semibold'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-[#14141c]'
-            }`}
-          >
-            <Layers className="w-3.5 h-3.5 text-emerald-400" />
-            Composite
-          </button>
-          <button
-            id="btn-mode-quiver"
-            onClick={() => setRenderMode('quiver')}
-            className={`px-2.5 py-1 text-xs font-mono font-medium rounded transition-colors flex items-center gap-1.5 ${
-              renderMode === 'quiver'
-                ? 'bg-[#1a1a26] text-amber-300 border border-amber-500/40 shadow-sm font-semibold'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-[#14141c]'
-            }`}
-          >
-            <Move className="w-3.5 h-3.5 text-amber-400" />
-            Quiver
-          </button>
+        {/* Left: Perspective and Mode Switchers */}
+        <div className="flex items-center gap-1.5 flex-wrap pointer-events-auto">
+          {/* Perspective Selector */}
+          <div className="flex items-center gap-0.5 p-0.5 bg-[#0e0e13]/95 backdrop-blur-md rounded-md border border-[#1e1e24] shadow-md">
+            <button
+              onClick={() => setCloudConfig((prev) => ({ ...prev, perspectiveMode: 'space_global' }))}
+              className="px-2 py-1 text-[11px] font-mono font-medium rounded bg-[#1a1a26] text-cyan-300 border border-cyan-500/40 shadow-sm font-semibold flex items-center gap-1"
+              title="우주 전역 2D 뷰"
+            >
+              <Eye className="w-3 h-3 text-cyan-400" />
+              우주전역
+            </button>
+            <button
+              onClick={() => setCloudConfig((prev) => ({ ...prev, perspectiveMode: 'ground_sky' }))}
+              className="px-2 py-1 text-[11px] font-mono font-medium rounded text-slate-400 hover:text-slate-200 hover:bg-[#14141c] transition-colors flex items-center gap-1"
+              title="지상 관측자 하늘 뷰 (어안 렌즈)"
+            >
+              <Compass className="w-3 h-3 text-sky-400" />
+              지상하늘
+            </button>
+            <button
+              onClick={() => setCloudConfig((prev) => ({ ...prev, inspectionMode: 'split_3view' }))}
+              className="px-2 py-1 text-[11px] font-mono font-medium rounded text-slate-400 hover:text-slate-200 hover:bg-[#14141c] transition-colors flex items-center gap-1"
+              title="3분할 패턴 검증 뷰"
+            >
+              <Columns className="w-3 h-3 text-emerald-400" />
+              3분할검증
+            </button>
+          </div>
+
+          {/* Inspection View Mode Selector */}
+          <div className="flex items-center gap-0.5 p-0.5 bg-[#0e0e13]/95 backdrop-blur-md rounded-md border border-[#1e1e24] shadow-md">
+            <button
+              onClick={() => setCloudConfig((prev) => ({ ...prev, inspectionMode: 'none' }))}
+              className={`px-2 py-1 text-[11px] font-mono font-medium rounded transition-colors ${
+                !cloudConfig.inspectionMode || cloudConfig.inspectionMode === 'none'
+                  ? 'bg-[#1a1a26] text-slate-200 border border-slate-600/50 font-semibold'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-[#14141c]'
+              }`}
+              title="표준 다중 물리 시뮬레이션 모드"
+            >
+              표준
+            </button>
+            <button
+              onClick={() => setCloudConfig((prev) => ({ ...prev, inspectionMode: 'cloud_density' }))}
+              className={`px-2 py-1 text-[11px] font-mono font-medium rounded transition-colors flex items-center gap-1 ${
+                cloudConfig.inspectionMode === 'cloud_density'
+                  ? 'bg-cyan-950/70 text-cyan-300 border border-cyan-500/50 font-semibold'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-[#14141c]'
+              }`}
+              title="구름 레이어만 고대비 단독 렌더링 (Cloud-Only Mode)"
+            >
+              <Waves className="w-3 h-3 text-cyan-400" />
+              구름단독
+            </button>
+            <button
+              onClick={() => setCloudConfig((prev) => ({ ...prev, inspectionMode: 'hotspot_mask' }))}
+              className={`px-2 py-1 text-[11px] font-mono font-medium rounded transition-colors flex items-center gap-1 ${
+                cloudConfig.inspectionMode === 'hotspot_mask'
+                  ? 'bg-orange-950/70 text-orange-300 border border-orange-500/50 font-semibold'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-[#14141c]'
+              }`}
+              title="국소 활성화 마스크 M(x, y) 분석 모드"
+            >
+              <Flame className="w-3 h-3 text-orange-400" />
+              마스크
+            </button>
+            <button
+              onClick={() => setCloudConfig((prev) => ({ ...prev, inspectionMode: 'cloud_vector_overlay' }))}
+              className={`px-2 py-1 text-[11px] font-mono font-medium rounded transition-colors flex items-center gap-1 ${
+                cloudConfig.inspectionMode === 'cloud_vector_overlay'
+                  ? 'bg-sky-950/70 text-sky-300 border border-sky-500/50 font-semibold'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-[#14141c]'
+              }`}
+              title="구름 밀도 + 반투명 자기력선 정렬 오버레이"
+            >
+              <Layers className="w-3 h-3 text-sky-400" />
+              벡터오버레이
+            </button>
+          </div>
+
+          {/* Standard Physics Field Modes (only active when not in inspection isolated mode) */}
+          {(!cloudConfig.inspectionMode || cloudConfig.inspectionMode === 'none') && (
+            <div className="hidden xl:flex items-center gap-0.5 p-0.5 bg-[#0e0e13]/95 backdrop-blur-md rounded-md border border-[#1e1e24] shadow-md">
+              <button
+                id="btn-mode-streamlines"
+                onClick={() => setRenderMode('streamlines')}
+                className={`px-2 py-1 text-[11px] font-mono font-medium rounded transition-colors flex items-center gap-1 ${
+                  renderMode === 'streamlines'
+                    ? 'bg-[#1a1a26] text-cyan-300 border border-cyan-500/40 shadow-sm font-semibold'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-[#14141c]'
+                }`}
+              >
+                <Activity className="w-3 h-3 text-cyan-400" />
+                자기력선
+              </button>
+              <button
+                id="btn-mode-heatmap"
+                onClick={() => setRenderMode('heatmap')}
+                className={`px-2 py-1 text-[11px] font-mono font-medium rounded transition-colors flex items-center gap-1 ${
+                  renderMode === 'heatmap'
+                    ? 'bg-[#1a1a26] text-purple-300 border border-purple-500/40 shadow-sm font-semibold'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-[#14141c]'
+                }`}
+              >
+                <Flame className="w-3 h-3 text-purple-400" />
+                히트맵
+              </button>
+              <button
+                id="btn-mode-composite"
+                onClick={() => setRenderMode('composite')}
+                className={`px-2 py-1 text-[11px] font-mono font-medium rounded transition-colors flex items-center gap-1 ${
+                  renderMode === 'composite'
+                    ? 'bg-[#1a1a26] text-emerald-300 border border-emerald-500/40 shadow-sm font-semibold'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-[#14141c]'
+                }`}
+              >
+                <Layers className="w-3 h-3 text-emerald-400" />
+                통합
+              </button>
+            </div>
+          )}
         </div>
 
-        {/* Right: Simulation Controls & Neutral Points Toggle */}
-        <div className="flex items-center gap-1 p-0.5 bg-[#0e0e13]/95 backdrop-blur-md rounded-md border border-[#1e1e24] shadow-md pointer-events-auto">
+        {/* Right: Simulation Controls & Quick Gamma/Resolution */}
+        <div className="flex items-center gap-1.5 p-0.5 bg-[#0e0e13]/95 backdrop-blur-md rounded-md border border-[#1e1e24] shadow-md pointer-events-auto">
+          {/* Quick Gamma Slider (when in inspection mode) */}
+          {cloudConfig.inspectionMode && cloudConfig.inspectionMode !== 'none' && (
+            <div className="flex items-center gap-1.5 px-2 py-0.5 text-[10px] font-mono bg-[#14141d] rounded border border-[#222230]">
+              <span className="text-slate-400">γ:</span>
+              <strong className="text-cyan-300">{(cloudConfig.gamma ?? 0.6).toFixed(2)}</strong>
+              <input
+                type="range"
+                min="0.3"
+                max="1.2"
+                step="0.05"
+                value={cloudConfig.gamma ?? 0.6}
+                onChange={(e) => {
+                  const val = parseFloat(e.target.value);
+                  setCloudConfig((prev) => ({ ...prev, gamma: val }));
+                }}
+                className="w-14 accent-cyan-400 h-1 bg-[#222232] rounded"
+              />
+            </div>
+          )}
+
           {/* Neutral Points Toggle */}
           <button
             id="btn-toggle-neutral-points"

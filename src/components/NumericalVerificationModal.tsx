@@ -250,12 +250,18 @@ print("Numerical validation plot successfully generated: magnetic_wave_cloud_sim
           customizationRequest: customRequest,
         }),
       });
-      const data = await res.json();
-      if (data.code) {
-        setGeneratedCode(data.code);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.code) {
+          setGeneratedCode(data.code);
+        }
+      } else {
+        // Fallback note on static hosting
+        setGeneratedCode(`# [알림] 정적 호스팅(GitHub Pages) 환경에서는 실시간 커스텀 AI 코드 생성이 제한됩니다.\n# 상단 탭의 '기본 수치 해석 스크립트'를 복사하거나 .py 파일로 다운로드하여 바로 실행하실 수 있습니다.\n\n` + basePythonCode);
       }
-    } catch (e) {
-      console.error(e);
+    } catch {
+      // Fallback
+      setGeneratedCode(`# [알림] 서버 연결이 원활하지 않습니다. 기본 수치 모델링 코드를 제공합니다.\n\n` + basePythonCode);
     } finally {
       setIsGeneratingAICode(false);
     }

@@ -24,6 +24,10 @@ import {
   Flame,
   Layers,
   ChevronRight,
+  Eye,
+  Columns,
+  Waves,
+  Sparkles,
 } from 'lucide-react';
 
 interface PhysicsControlsProps {
@@ -679,6 +683,168 @@ export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
                   </div>
                 </div>
               )}
+            </div>
+
+            {/* INSPECTION VIEW & PERSPECTIVE CONTROL SECTION */}
+            <div className="p-2.5 bg-[#121218] rounded-md border border-purple-900/40 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="font-semibold text-purple-300 text-xs flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+                    지진운 격리 시각화 및 패턴 검증 뷰 (Inspection Mode)
+                  </div>
+                  <div className="text-[10px] text-slate-400">
+                    배경 간섭 요소를 끄고 파동운의 국소성과 직교 정렬을 고대비로 정밀 검증
+                  </div>
+                </div>
+              </div>
+
+              {/* Mode Selection */}
+              <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  onClick={() => setCloudConfig((prev) => ({ ...prev, inspectionMode: 'cloud_density' }))}
+                  className={`p-1.5 rounded border text-[11px] font-mono text-left transition-colors flex items-center gap-1.5 ${
+                    cloudConfig.inspectionMode === 'cloud_density'
+                      ? 'bg-cyan-950/60 text-cyan-300 border-cyan-500/50 font-semibold'
+                      : 'bg-[#14141d] text-slate-400 border-[#222230] hover:text-slate-200'
+                  }`}
+                >
+                  <Waves className="w-3.5 h-3.5 text-cyan-400" />
+                  <div>
+                    <div className="font-bold">1. 순수 구름 단독</div>
+                    <div className="text-[9px] text-slate-500">배경 요소 차단, C(x,y)만 렌더</div>
+                  </div>
+                </button>
+
+                <button
+                  onClick={() => setCloudConfig((prev) => ({ ...prev, inspectionMode: 'hotspot_mask' }))}
+                  className={`p-1.5 rounded border text-[11px] font-mono text-left transition-colors flex items-center gap-1.5 ${
+                    cloudConfig.inspectionMode === 'hotspot_mask'
+                      ? 'bg-orange-950/60 text-orange-300 border-orange-500/50 font-semibold'
+                      : 'bg-[#14141d] text-slate-400 border-[#222230] hover:text-slate-200'
+                  }`}
+                >
+                  <Flame className="w-3.5 h-3.5 text-orange-400" />
+                  <div>
+                    <div className="font-bold">2. 핫스팟 마스크 분석</div>
+                    <div className="text-[9px] text-slate-500">M(x,y) 시그모이드 활성화 영역</div>
+                  </div>
+                </button>
+
+                <button
+                  onClick={() => setCloudConfig((prev) => ({ ...prev, inspectionMode: 'cloud_vector_overlay' }))}
+                  className={`p-1.5 rounded border text-[11px] font-mono text-left transition-colors flex items-center gap-1.5 ${
+                    cloudConfig.inspectionMode === 'cloud_vector_overlay'
+                      ? 'bg-sky-950/60 text-sky-300 border-sky-500/50 font-semibold'
+                      : 'bg-[#14141d] text-slate-400 border-[#222230] hover:text-slate-200'
+                  }`}
+                >
+                  <Layers className="w-3.5 h-3.5 text-sky-400" />
+                  <div>
+                    <div className="font-bold">3. 벡터 정렬 오버레이</div>
+                    <div className="text-[9px] text-slate-500">반투명(α=0.35) 자기력선 중첩</div>
+                  </div>
+                </button>
+
+                <button
+                  onClick={() => setCloudConfig((prev) => ({ ...prev, inspectionMode: 'split_3view', perspectiveMode: 'space_global' }))}
+                  className={`p-1.5 rounded border text-[11px] font-mono text-left transition-colors flex items-center gap-1.5 ${
+                    cloudConfig.inspectionMode === 'split_3view'
+                      ? 'bg-emerald-950/60 text-emerald-300 border-emerald-500/50 font-semibold'
+                      : 'bg-[#14141d] text-slate-400 border-[#222230] hover:text-slate-200'
+                  }`}
+                >
+                  <Columns className="w-3.5 h-3.5 text-emerald-400" />
+                  <div>
+                    <div className="font-bold">4. 3분할 패턴 비교 뷰</div>
+                    <div className="text-[9px] text-slate-500">수치 스크립트 1:1 동기화 3-Plot</div>
+                  </div>
+                </button>
+              </div>
+
+              {/* Perspective Mode Switcher */}
+              <div className="p-2 bg-[#161622] rounded border border-[#262638] space-y-1.5">
+                <div className="text-[11px] font-semibold text-slate-300 flex items-center gap-1">
+                  <Eye className="w-3 h-3 text-cyan-400" />
+                  관측 시점 (Perspective Mode)
+                </div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    onClick={() => setCloudConfig((prev) => ({ ...prev, perspectiveMode: 'space_global' }))}
+                    className={`py-1 text-xs font-mono rounded border text-center transition-colors ${
+                      cloudConfig.perspectiveMode === 'space_global' || !cloudConfig.perspectiveMode
+                        ? 'bg-cyan-950/60 text-cyan-300 border-cyan-500/40 font-semibold'
+                        : 'bg-[#0f0f15] text-slate-400 border-[#1e1e24]'
+                    }`}
+                  >
+                    우주 전역 2D 뷰
+                  </button>
+                  <button
+                    onClick={() => setCloudConfig((prev) => ({ ...prev, perspectiveMode: 'ground_sky' }))}
+                    className={`py-1 text-xs font-mono rounded border text-center transition-colors ${
+                      cloudConfig.perspectiveMode === 'ground_sky'
+                        ? 'bg-cyan-950/60 text-cyan-300 border-cyan-500/40 font-semibold'
+                        : 'bg-[#0f0f15] text-slate-400 border-[#1e1e24]'
+                    }`}
+                  >
+                    지상 관측자 하늘 뷰 (어안 렌즈)
+                  </button>
+                </div>
+              </div>
+
+              {/* Gamma and Palette Controls */}
+              <div className="space-y-2 pt-1 border-t border-[#1e1e24]">
+                <div>
+                  <div className="flex justify-between text-slate-300 mb-1 text-[11px]">
+                    <span>비선형 대비 보정 (감마 γ) : C_vis = C^γ</span>
+                    <span className="font-mono text-cyan-400 font-bold">
+                      {(cloudConfig.gamma ?? 0.6).toFixed(2)}
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.3"
+                    max="1.2"
+                    step="0.05"
+                    value={cloudConfig.gamma ?? 0.6}
+                    onChange={(e) =>
+                      setCloudConfig((prev) => ({ ...prev, gamma: parseFloat(e.target.value) }))
+                    }
+                    className="w-full accent-cyan-400 h-1.5 bg-[#09090c] rounded"
+                  />
+                  <div className="flex justify-between text-[9px] text-slate-500 font-mono mt-0.5">
+                    <span>0.3 (약한 구름 강조)</span>
+                    <span>0.6 (표준 대비)</span>
+                    <span>1.2 (피크 중심)</span>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="text-[11px] text-slate-300 mb-1">구름 컬러맵 팔레트 (Colormap Palette)</div>
+                  <div className="grid grid-cols-2 gap-1 font-mono text-[10px]">
+                    {[
+                      { id: 'satellite_bone', name: '위성 가시광선 (Bone)' },
+                      { id: 'pure_white', name: '순백조 (Pure White)' },
+                      { id: 'deep_sky_cyan', name: '대기 시안 (Atmospheric)' },
+                      { id: 'night_infrared', name: '야간 적외선 (Infrared)' },
+                    ].map((pal) => (
+                      <button
+                        key={pal.id}
+                        onClick={() =>
+                          setCloudConfig((prev) => ({ ...prev, colorPalette: pal.id as any }))
+                        }
+                        className={`p-1 rounded border text-left truncate transition-colors ${
+                          (cloudConfig.colorPalette ?? 'satellite_bone') === pal.id
+                            ? 'bg-purple-950/60 text-purple-300 border-purple-500/40 font-semibold'
+                            : 'bg-[#14141d] text-slate-400 border-[#222230] hover:text-slate-200'
+                        }`}
+                      >
+                        {pal.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         )}

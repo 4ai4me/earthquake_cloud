@@ -123,18 +123,26 @@ export const GeminiExpertAssistant: React.FC<GeminiExpertAssistantProps> = ({
         }),
       });
 
-      const data = await res.json();
+      let data: any = {};
+      try {
+        data = await res.json();
+      } catch {
+        if (!res.ok) {
+          throw new Error('정적 웹 호스팅(GitHub Pages) 환경입니다. 대화형 AI 분석 기능은 Node.js 서버 환경에서 실행하거나 개발 환경에서 지원됩니다. (2D/3D 물리 계산 및 파동운 시뮬레이션은 100% 브라우저에서 정상 작동합니다.)');
+        }
+      }
+
       if (data.error) {
         setMessages((prev) => [
           ...prev,
           {
             id: `error-${Date.now()}`,
             role: 'assistant',
-            content: `⚠️ 오류 발생: ${data.error}`,
+            content: `⚠️ 오류: ${data.error}`,
             timestamp: Date.now(),
           },
         ]);
-      } else {
+      } else if (data.text) {
         setMessages((prev) => [
           ...prev,
           {
@@ -153,7 +161,7 @@ export const GeminiExpertAssistant: React.FC<GeminiExpertAssistantProps> = ({
         {
           id: `error-${Date.now()}`,
           role: 'assistant',
-          content: `⚠️ 네트워크 오류가 발생했습니다: ${err.message}`,
+          content: `ℹ️ ${err.message || '요청을 처리할 수 없습니다.'}`,
           timestamp: Date.now(),
         },
       ]);

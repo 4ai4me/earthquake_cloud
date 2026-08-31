@@ -35,6 +35,18 @@ export interface SolarWindConfig {
   density: number; // particle density
 }
 
+export type InspectionViewMode = 'none' | 'cloud_density' | 'hotspot_mask' | 'cloud_vector_overlay' | 'split_3view';
+export type PerspectiveViewMode = 'space_global' | 'ground_sky';
+export type CloudColorPalette = 'satellite_bone' | 'pure_white' | 'deep_sky_cyan' | 'night_infrared';
+
+export interface GroundObserverConfig {
+  angleDeg: number; // 0 to 360 deg around Earth circle (0 = +X, 90 = +Y North, 180 = -X night, 270 = -Y South)
+  label: string;
+  altitudeKm: number; // cloud layer altitude (e.g. 5 to 12 km)
+  fovDeg: number; // fish-eye field of view (e.g. 140 deg)
+  azimuthOffsetDeg: number; // rotation offset in sky dome
+}
+
 export interface AtmosphericCloudConfig {
   enabled: boolean;
   particleCount: number; // 200 to 2000
@@ -50,6 +62,14 @@ export interface AtmosphericCloudConfig {
   gradientWeight: number; // alpha for gradient term in I(x, y)
   cloudOpacity: number;
   viscosity: number;
+  // Inspection and Perspective enhancements
+  inspectionMode?: InspectionViewMode;
+  perspectiveMode?: PerspectiveViewMode;
+  gamma?: number; // Non-linear gamma for contrast enhancement (default ~0.6)
+  colorPalette?: CloudColorPalette;
+  highResGrid?: boolean; // 500x500 high-resolution offscreen rendering
+  streamlineAlpha?: number; // Low-alpha streamlines in overlay mode (0.1 to 0.8)
+  groundObserver?: GroundObserverConfig;
 }
 
 export interface CrustalNode {

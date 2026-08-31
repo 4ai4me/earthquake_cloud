@@ -440,3 +440,113 @@ export function computeWaveCloudDensity(
   };
 }
 
+/**
+ * Applies non-linear gamma curve to cloud density for high-contrast inspection:
+ * C_vis = C_density^gamma (gamma approx 0.5 - 0.7)
+ */
+export function applyCloudGamma(density: number, gamma: number = 0.6): number {
+  const clamped = Math.max(0, Math.min(1, density));
+  return Math.pow(clamped, Math.max(0.1, gamma));
+}
+
+/**
+ * Returns RGBA color for high-contrast cloud inspection palettes:
+ * - 'satellite_bone': Visible satellite meteorological bone/grayscale palette
+ * - 'pure_white': Deep space contrast with pure crisp white vapor
+ * - 'deep_sky_cyan': Atmospheric ozone & cyan vapor glow
+ * - 'night_infrared': Thermal infrared brightness temperature colormap
+ */
+export function getInspectionCloudColor(
+  visDensity: number,
+  palette: 'satellite_bone' | 'pure_white' | 'deep_sky_cyan' | 'night_infrared' = 'satellite_bone',
+  alphaMultiplier: number = 1.0
+): string {
+  const d = Math.max(0, Math.min(1, visDensity));
+  const alpha = Math.min(1.0, d * alphaMultiplier);
+
+  if (palette === 'satellite_bone') {
+    // Meteorological visible satellite bone colormap
+    const r = Math.round(d * 245 + 10);
+    const g = Math.round(d * 248 + 7);
+    const b = Math.round(d * 255);
+    return `rgba(${r}, ${g}, ${b}, ${alpha.toFixed(3)})`;
+  } else if (palette === 'pure_white') {
+    const v = Math.round(d * 255);
+    return `rgba(${v}, ${v}, ${v}, ${alpha.toFixed(3)})`;
+  } else if (palette === 'deep_sky_cyan') {
+    // Electric atmospheric cyan
+    const r = Math.round(d * 180 + 30);
+    const g = Math.round(d * 230 + 25);
+    const b = Math.round(d * 255);
+    return `rgba(${r}, ${g}, ${b}, ${alpha.toFixed(3)})`;
+  } else {
+    // Night infrared thermal palette (black -> dark blue -> orange -> white)
+    if (d < 0.25) {
+      const t = d / 0.25;
+      return `rgba(${Math.round(20 * t)}, ${Math.round(40 * t)}, ${Math.round(160 * t)}, ${alpha.toFixed(3)})`;
+    } else if (d < 0.65) {
+      const t = (d - 0.25) / 0.4;
+      return `rgba(${Math.round(20 + 200 * t)}, ${Math.round(40 + 120 * t)}, ${Math.round(160 * (1 - t))}, ${alpha.toFixed(3)})`;
+    } else {
+      const t = (d - 0.65) / 0.35;
+      return `rgba(255, ${Math.round(160 + 95 * t)}, ${Math.round(95 * t)}, ${alpha.toFixed(3)})`;
+    }
+  }
+}
+
+/**
+ * Maps Ground Observer Sky Dome Fish-Eye Normalized Coordinates (u, v) with u^2 + v^2 <= 1
+ * into physical 2D atmospheric space above the observer.
+ */
+export function mapSkyDomeToAtmosphere(
+  u: number,
+  v: number,
+  earthConfig: EarthDipoleConfig,
+  observerAngleDeg: number,
+  altitudeKm: number = 8.0,
+  fovDeg: number = 140
+): { wx: number; wy: number; zenithAngleRad: number; azimuthRad: number; isVisible: boolean } {
+  const rNorm = Math.sqrt(u * u + v * v);
+  if (rNorm > 1.0) {
+    return { wx: 0, wy: 0, zenithAngleRad: Math.PI / 2, azimuthRad: 0, isVisible: false };
+  }
+
+  // Zenith angle: 0 at center (u=0, v=0), max zenith at dome edge
+  const maxZenithRad = ((fovDeg / 2) * Math.PI) / 180;
+  const zenithAngleRad = rNorm * maxZenithRad;
+  const azimuthRad = Math.atan2(v, u);
+
+  // Observer on Earth surface
+  const obsRad = (observerAngleDeg * Math.PI) / 180;
+  const earthR = earthConfig.radius;
+  
+  // Convert atmospheric altitude (e.g. 8 km scaled to R_E units where R_E ~ 6371km => 8/6371 ~ 0.00125 * scale)
+  const atmAltitudeUnits = earthR * 0.22; // Scaled atmospheric layer for 2D visual fidelity
+  
+  // Displacement along horizon (tangent) and zenith (normal)
+  const zenithOffset = Math.cos(zenithAngleRad) * atmAltitudeUnits;
+  const horizonOffset = Math.sin(zenithAngleRad) * Math.cos(azimuthRad) * (atmAltitudeUnits * 3.2);
+
+  // Observer center position
+  const ox = earthConfig.x + earthR * Math.cos(obsRad);
+  const oy = earthConfig.y + earthR * Math.sin(obsRad);
+
+  // Normal (zenith) and Tangent (horizon) unit vectors
+  const normX = Math.cos(obsRad);
+  const normY = Math.sin(obsRad);
+  const tangX = -Math.sin(obsRad);
+  const tangY = Math.cos(obsRad);
+
+  const wx = ox + normX * zenithOffset + tangX * horizonOffset;
+  const wy = oy + normY * zenithOffset + tangY * horizonOffset;
+
+  return {
+    wx,
+    wy,
+    zenithAngleRad,
+    azimuthRad,
+    isVisible: true,
+  };
+}
+
+

@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useState, useMemo, useCallback } from 'react';
+import React, { Suspense, lazy, useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import {
   AtmosphericCloudConfig,
   EarthDipoleConfig,
@@ -33,6 +33,7 @@ import {
   Globe,
   Layers,
   Maximize2,
+  Minimize2,
   Moon,
   Radio,
   RotateCcw,
@@ -95,6 +96,42 @@ export default function App() {
   const [activeControlTab, setActiveControlTab] = useState<'earth' | 'sources' | 'solar' | 'cloud' | 'aerosol' | 'moon' | 'stress' | 'presets' | 'weather'>('presets');
   const [isPythonModalOpen, setIsPythonModalOpen] = useState<boolean>(false);
   const [latestEarthquake, setLatestEarthquake] = useState<EarthquakeEvent | null>(null);
+  const simulationViewportRef = useRef<HTMLDivElement | null>(null);
+  const [isViewportFullscreen, setIsViewportFullscreen] = useState(false);
+  const [fullscreenError, setFullscreenError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsViewportFullscreen(document.fullscreenElement === simulationViewportRef.current);
+      // Both canvas ResizeObserver and the Three.js container observer receive
+      // the layout change; resize also covers browsers that delay that signal.
+      requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
+      window.setTimeout(() => window.dispatchEvent(new Event('resize')), 120);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
+
+  const toggleSimulationFullscreen = useCallback(async () => {
+    setFullscreenError(null);
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+        return;
+      }
+      const viewport = simulationViewportRef.current;
+      if (!viewport?.requestFullscreen) {
+        setFullscreenError('이 브라우저는 전체 화면 API를 지원하지 않습니다.');
+        return;
+      }
+      await viewport.requestFullscreen({ navigationUI: 'hide' });
+    } catch (error) {
+      console.error('Simulation fullscreen request failed', {
+        name: error instanceof Error ? error.name : 'UnknownError',
+      });
+      setFullscreenError('전체 화면을 시작하지 못했습니다. 브라우저 권한을 확인해 주세요.');
+    }
+  }, []);
 
   // Earthquake Event Handler
   const handleEarthquakeTriggered = useCallback((event: EarthquakeEvent) => {
@@ -400,7 +437,15 @@ export default function App() {
         {/* Left / Center Viewport Column (Canvas 2D / 3D) */}
         <div className="lg:col-span-7 xl:col-span-8 flex flex-col gap-3.5">
           {/* Main Visualizer Area */}
-          <div className="w-full h-[540px] md:h-[620px] lg:h-[calc(100vh-5.5rem)] lg:min-h-[32rem] lg:max-h-[620px] rounded-lg border border-[#1e1e24] bg-[#0c0c10] overflow-hidden shadow-2xl shadow-black/80">
+          <div
+            ref={simulationViewportRef}
+            data-testid="simulation-viewport"
+            className={`relative w-full bg-[#0c0c10] overflow-hidden shadow-2xl shadow-black/80 ${
+              isViewportFullscreen
+                ? 'h-screen min-h-0 max-h-none rounded-none border-0'
+                : 'h-[540px] md:h-[620px] lg:h-[calc(100vh-5.5rem)] lg:min-h-[32rem] lg:max-h-[620px] rounded-lg border border-[#1e1e24]'
+            }`}
+          >
             {viewMode === '2D' && (
               <SimulationCanvas2D
                 key={`${cloudConfig.perspectiveMode ?? 'space_global'}:${cloudConfig.inspectionMode === 'split_3view' ? 'split' : 'canvas'}`}
@@ -475,6 +520,25 @@ export default function App() {
                     cloudConfig={cloudConfig}
                   />
                 </Suspense>
+              </div>
+            )}
+
+            <button
+              id="btn-simulation-fullscreen"
+              type="button"
+              aria-label={isViewportFullscreen ? '시뮬레이션 전체 화면 종료' : '시뮬레이션만 전체 화면으로 보기'}
+              aria-pressed={isViewportFullscreen}
+              onClick={toggleSimulationFullscreen}
+              title={isViewportFullscreen ? '전체 화면 종료 (Esc)' : '시뮬레이션 화면만 전체 화면으로 표시'}
+              className="absolute bottom-3 right-3 z-50 flex items-center gap-1.5 rounded-md border border-cyan-500/35 bg-[#0b1118]/90 px-2.5 py-1.5 text-[11px] font-mono font-semibold text-cyan-200 shadow-xl backdrop-blur-md transition-colors hover:bg-cyan-950/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+            >
+              {isViewportFullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+              <span>{isViewportFullscreen ? '전체 화면 종료' : '전체 화면'}</span>
+            </button>
+
+            {fullscreenError && (
+              <div role="alert" className="absolute left-1/2 top-3 z-50 -translate-x-1/2 rounded border border-red-500/50 bg-red-950/90 px-3 py-1.5 text-xs text-red-200 shadow-xl">
+                {fullscreenError}
               </div>
             )}
           </div>

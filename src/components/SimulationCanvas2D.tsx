@@ -150,6 +150,14 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
   const animationPhaseRef = useRef<number>(0);
   const [fps, setFps] = useState<number>(60);
   const fpsCounterRef = useRef<{ frames: number; lastTime: number }>({ frames: 0, lastTime: performance.now() });
+  const moonConfigRef = useRef<MoonConfig | undefined>(moonConfig);
+  const lastMoonUiSyncRef = useRef<number>(0);
+
+  // Keep manual controls and preset changes authoritative without forcing the
+  // animation effect to restart for every automatic-orbit frame.
+  useEffect(() => {
+    moonConfigRef.current = moonConfig;
+  }, [moonConfig]);
 
   // Convert World coordinates to Canvas pixels
   const worldToCanvas = useCallback(
@@ -213,6 +221,7 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
       const dt = Math.max(0, Math.min((now - lastTimestamp) / 1000, 0.05));
       lastTimestamp = now;
       let animationPhase = animationPhaseRef.current;
+      let frameMoonConfig = moonConfigRef.current;
 
       // Update FPS counter
       fpsCounterRef.current.frames++;
@@ -246,18 +255,30 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
         });
 
         // Update Moon Orbit if autoOrbit enabled
-        if (moonConfig?.enabled && moonConfig.autoOrbit && setMoonConfig) {
-          setMoonConfig((prev) => ({
-            ...prev,
-            phaseAngleDeg: (prev.phaseAngleDeg + (prev.orbitSpeed ?? 0.3) * dt * 25) % 360,
-          }));
+        if (frameMoonConfig?.enabled && frameMoonConfig.autoOrbit) {
+          frameMoonConfig = {
+            ...frameMoonConfig,
+            phaseAngleDeg: (frameMoonConfig.phaseAngleDeg + (frameMoonConfig.orbitSpeed ?? 0.3) * dt * 25) % 360,
+          };
+          moonConfigRef.current = frameMoonConfig;
+
+          // The canvas and physics use the smooth frame value above. React UI
+          // controls only need a readable value a few times per second; updating
+          // App state at 60 Hz previously rebuilt the entire interface and loop.
+          if (setMoonConfig && now - lastMoonUiSyncRef.current >= 250) {
+            const syncedPhase = frameMoonConfig.phaseAngleDeg;
+            lastMoonUiSyncRef.current = now;
+            setMoonConfig((prev) =>
+              prev.enabled && prev.autoOrbit ? { ...prev, phaseAngleDeg: syncedPhase } : prev
+            );
+          }
         }
 
         // Update atmospheric cloud particles
         particleSystem.update(cloudConfig, earthConfig, sources, solarWind, dt, animationPhase);
 
         // Update crustal stress and check seismic ruptures with Solid Earth Tidal Modulation
-        stressManager.update(earthConfig, sources, solarWind, dt, onEarthquakeTriggered, moonConfig);
+        stressManager.update(earthConfig, sources, solarWind, dt, onEarthquakeTriggered, frameMoonConfig);
       }
 
       const canvas = canvasRef.current;
@@ -550,8 +571,8 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
             const sy = earthConfig.y + Math.sin(angle) * dist;
 
             // Trace forward and backward
-            const lineForward = traceStreamlineRK4(sx, sy, earthConfig, sources, solarWind, 1, traceMaxSteps, traceStep, traceBounds, moonConfig);
-            const lineBackward = traceStreamlineRK4(sx, sy, earthConfig, sources, solarWind, -1, traceMaxSteps, traceStep, traceBounds, moonConfig);
+            const lineForward = traceStreamlineRK4(sx, sy, earthConfig, sources, solarWind, 1, traceMaxSteps, traceStep, traceBounds, frameMoonConfig);
+            const lineBackward = traceStreamlineRK4(sx, sy, earthConfig, sources, solarWind, -1, traceMaxSteps, traceStep, traceBounds, frameMoonConfig);
             const fullLine = [...lineBackward.reverse(), ...lineForward];
 
             if (fullLine.length > 2) {
@@ -596,7 +617,7 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
             const extAngle = (k / extSeeds) * Math.PI * 2;
             const esx = s.x + Math.cos(extAngle) * 0.25;
             const esy = s.y + Math.sin(extAngle) * 0.25;
-            const extLine = traceStreamlineRK4(esx, esy, earthConfig, sources, solarWind, s.type === 'monopole_s' ? -1 : 1, traceMaxSteps, traceStep, traceBounds, moonConfig);
+            const extLine = traceStreamlineRK4(esx, esy, earthConfig, sources, solarWind, s.type === 'monopole_s' ? -1 : 1, traceMaxSteps, traceStep, traceBounds, frameMoonConfig);
 
             if (extLine.length > 2) {
               ctx.beginPath();
@@ -1159,16 +1180,16 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
       }
 
       // 12. Render Moon Body, Lunar Orbit, and Solid Earth Tidal Bulge
-      if (moonConfig?.enabled) {
-        const moonAngleRad = (moonConfig.phaseAngleDeg * Math.PI) / 180;
-        const moonDist = moonConfig.orbitRadius ?? 3.5;
+      if (frameMoonConfig?.enabled) {
+        const moonAngleRad = (frameMoonConfig.phaseAngleDeg * Math.PI) / 180;
+        const moonDist = frameMoonConfig.orbitRadius ?? 3.5;
         const moonX = earthConfig.x + Math.cos(moonAngleRad) * moonDist;
         const moonY = earthConfig.y + Math.sin(moonAngleRad) * moonDist;
         const moonCanvas = worldToCanvas(moonX, moonY, width, height);
-        const moonRadiusPx = Math.max(8, (moonConfig.radius ?? 0.26) * zoom);
+        const moonRadiusPx = Math.max(8, (frameMoonConfig.radius ?? 0.26) * zoom);
 
         // A. Orbit Path Ring
-        if (currentLayers.moonOrbit && moonConfig.showOrbit !== false) {
+        if (currentLayers.moonOrbit && frameMoonConfig.showOrbit !== false) {
           ctx.save();
           ctx.strokeStyle = 'rgba(148, 163, 184, 0.35)';
           ctx.setLineDash([4, 4]);
@@ -1188,9 +1209,9 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
         }
 
         // B. Solid Earth Tidal Bulge on Earth's Crust
-        if (currentLayers.lunarTideBulge && moonConfig.showTidalBulge !== false) {
+        if (currentLayers.lunarTideBulge && frameMoonConfig.showTidalBulge !== false) {
           ctx.save();
-          const tidalWeight = moonConfig.tidalStressWeight ?? 0.25;
+          const tidalWeight = frameMoonConfig.tidalStressWeight ?? 0.25;
           const earthRadiusPx = earthConfig.radius * zoom;
           const bulgeOffsetPx = earthRadiusPx * 0.12 * (tidalWeight / 0.25);
 
@@ -1311,8 +1332,8 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
           ctx.stroke();
 
           // Remanent Crustal Dipole Vector arrow
-          if (moonConfig.remanentMoment && moonConfig.remanentMoment > 0.01) {
-            const remAngle = ((moonConfig.remanentAngle ?? 15) * Math.PI) / 180;
+          if (frameMoonConfig.remanentMoment && frameMoonConfig.remanentMoment > 0.01) {
+            const remAngle = ((frameMoonConfig.remanentAngle ?? 15) * Math.PI) / 180;
             const arrowLen = moonRadiusPx * 1.6;
             const dx = Math.cos(remAngle) * arrowLen;
             const dy = -Math.sin(remAngle) * arrowLen;
@@ -1338,17 +1359,17 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
           ctx.fillStyle = '#94a3b8';
           ctx.font = '9px sans-serif';
           const phaseName =
-            Math.abs(moonConfig.phaseAngleDeg - 0) < 20
+            Math.abs(frameMoonConfig.phaseAngleDeg - 0) < 20
               ? '신월 (New Moon)'
-              : Math.abs(moonConfig.phaseAngleDeg - 90) < 20
+              : Math.abs(frameMoonConfig.phaseAngleDeg - 90) < 20
               ? '상현 (First Qtr)'
-              : Math.abs(moonConfig.phaseAngleDeg - 180) < 20
+              : Math.abs(frameMoonConfig.phaseAngleDeg - 180) < 20
               ? '보름달 (Full Moon)'
-              : Math.abs(moonConfig.phaseAngleDeg - 270) < 20
+              : Math.abs(frameMoonConfig.phaseAngleDeg - 270) < 20
               ? '하현 (Third Qtr)'
-              : `${Math.round(moonConfig.phaseAngleDeg)}°`;
+              : `${Math.round(frameMoonConfig.phaseAngleDeg)}°`;
           ctx.fillText(
-            `위상: ${phaseName} | 기조력 ${(moonConfig.tidalStressWeight ?? 0.25).toFixed(2)}`,
+            `위상: ${phaseName} | 기조력 ${(frameMoonConfig.tidalStressWeight ?? 0.25).toFixed(2)}`,
             moonCanvas.cx,
             moonCanvas.cy + moonRadiusPx + 26
           );
@@ -1398,7 +1419,6 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
     earthConfig,
     sources,
     solarWind,
-    moonConfig,
     cloudConfig,
     stressManager,
     particleSystem,

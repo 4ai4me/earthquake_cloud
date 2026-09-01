@@ -2,14 +2,14 @@ name: Deploy to GitHub Pages
 
 on:
   # This repository currently has Pages configured as "Deploy from a branch".
-  # Wait for GitHub's generated branch deployment to finish, then publish the
-  # Vite artifact last so the raw source index cannot overwrite the built app.
-  workflow_run:
-    workflows: ['pages build and deployment']
-    types: [completed]
+  # The deploy job waits for GitHub's generated branch deployment, then
+  # publishes the Vite artifact last so raw source cannot overwrite the app.
+  push:
+    branches: ['main', 'master']
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
   pages: write
   id-token: write
@@ -20,7 +20,6 @@ concurrency:
 
 jobs:
   build-and-deploy:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -28,8 +27,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -49,6 +46,28 @@ jobs:
         uses: actions/upload-pages-artifact@v3
         with:
           path: './dist'
+
+      - name: Wait for generated branch Pages deployment
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          status="missing"
+          conclusion=""
+          for attempt in {1..36}; do
+            response="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${GITHUB_SHA}&event=dynamic&per_page=5")"
+            status="$(jq -r '.workflow_runs[0].status // "missing"' <<<"$response")"
+            conclusion="$(jq -r '.workflow_runs[0].conclusion // ""' <<<"$response")"
+            if [[ "$status" == "completed" ]]; then
+              break
+            fi
+            sleep 5
+          done
+          if [[ "$status" != "completed" || "$conclusion" != "success" ]]; then
+            echo "Generated Pages deployment did not complete successfully: status=$status conclusion=$conclusion"
+            exit 1
+          fi
 
       - name: Deploy to GitHub Pages
         id: deployment

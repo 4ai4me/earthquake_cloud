@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { Suspense, lazy, useState, useMemo, useCallback } from 'react';
 import {
   AtmosphericCloudConfig,
   EarthDipoleConfig,
@@ -10,16 +10,18 @@ import {
   MoonConfig,
   RenderMode,
   SolarWindConfig,
+  DEFAULT_CLOUD_CONFIG,
+  DEFAULT_EARTH_DIPOLE,
+  DEFAULT_MOON_CONFIG,
+  DEFAULT_SOLAR_WIND,
 } from './types';
 import { CloudParticleSystem } from './physics/cloudParticleEngine';
 import { CrustalStressManager } from './physics/crustalStressEngine';
 import { GLOBAL_WEATHER_PRESETS } from './physics/weatherEngine';
 import { SimulationCanvas2D } from './components/SimulationCanvas2D';
 import { DEFAULT_LAYER_VISIBILITY } from './components/VisualElementsGuidePanel';
-import { Magnetosphere3DView } from './components/Magnetosphere3DView';
 import { PhysicsControls } from './components/PhysicsControls';
 import { MathFormulaCard } from './components/MathFormulaCard';
-import { NumericalVerificationModal } from './components/NumericalVerificationModal';
 import {
   Activity,
   AlertOctagon,
@@ -41,70 +43,30 @@ import {
   Zap,
 } from 'lucide-react';
 
-const DEFAULT_EARTH_CONFIG: EarthDipoleConfig = {
-  x: 0,
-  y: 0,
-  moment: 2.2,
-  tiltAngle: 11,
-  radius: 0.95,
-  reversed: false,
-};
+const Magnetosphere3DView = lazy(() =>
+  import('./components/Magnetosphere3DView').then((module) => ({ default: module.Magnetosphere3DView }))
+);
+const NumericalVerificationModal = lazy(() =>
+  import('./components/NumericalVerificationModal').then((module) => ({ default: module.NumericalVerificationModal }))
+);
 
-const DEFAULT_SOLAR_WIND: SolarWindConfig = {
-  enabled: false, // 외부 자극 없는 상태
-  pressure: 1.0,
-  imfBx: 0.0,
-  imfBz: 0.0,
-  speed: 1.0,
-  density: 1.0,
-};
+const createDefaultCloudConfig = (): AtmosphericCloudConfig => ({
+  ...DEFAULT_CLOUD_CONFIG,
+  weatherData: { ...GLOBAL_WEATHER_PRESETS[0].data },
+});
 
-const DEFAULT_MOON_CONFIG: MoonConfig = {
-  enabled: true,
-  orbitRadius: 3.5,
-  orbitPeriodDays: 27.32,
-  phaseAngleDeg: 45,
-  radius: 0.26,
-  remanentMoment: 0.15,
-  remanentAngle: 15,
-  tidalStressWeight: 0.25,
-  wakeCavityStrength: 0.7,
-  showOrbit: true,
-  showTidalBulge: true,
-  autoOrbit: true,
-  orbitSpeed: 0.3,
-};
-
-const DEFAULT_CLOUD_CONFIG: AtmosphericCloudConfig = {
-  enabled: true,
-  particleCount: 500,
-  polarizationSusceptibility: 1.2,
-  chargeRatio: 0.6,
-  condensationThreshold: 0.8,
-  showParticles: true,
-  showCloudBands: true,
-  showWaveClouds: true,
-  externalStimulusThreshold: 0.5,
-  interferenceThreshold: 0.85,
-  sigmoidSteepness: 6.0,
-  waveWavelength: 0.8,
-  gradientWeight: 0.5,
-  cloudOpacity: 0.85,
-  viscosity: 0.08,
-  perspectiveMode: 'space_global',
-  inspectionMode: 'none',
-  gamma: 0.6,
-  colorPalette: 'satellite_bone',
-  weatherData: GLOBAL_WEATHER_PRESETS[0].data,
-  useLiveWeather: false,
-};
+const ViewLoadingFallback = () => (
+  <div className="h-full w-full flex items-center justify-center bg-[#09090d] text-xs font-mono text-cyan-300">
+    시각화 모듈을 불러오는 중입니다…
+  </div>
+);
 
 export default function App() {
   // 1. Global Meteorological Data State (NOAA GFS / ECMWF IFS / DWD ICON)
   const [weatherData, setWeatherData] = useState<GlobalWeatherData>(GLOBAL_WEATHER_PRESETS[0].data);
 
   // 2. Earth Dipole Configuration
-  const [earthConfig, setEarthConfig] = useState<EarthDipoleConfig>({ ...DEFAULT_EARTH_CONFIG });
+  const [earthConfig, setEarthConfig] = useState<EarthDipoleConfig>({ ...DEFAULT_EARTH_DIPOLE });
 
   // 3. External Magnetic Sources (Monopoles, Dipoles, Comets)
   const [sources, setSources] = useState<ExternalMagneticSource[]>([]);
@@ -116,7 +78,7 @@ export default function App() {
   const [moonConfig, setMoonConfig] = useState<MoonConfig>({ ...DEFAULT_MOON_CONFIG });
 
   // 6. Atmospheric Cloud Particle Model Configuration ("가상 지진운")
-  const [cloudConfig, setCloudConfig] = useState<AtmosphericCloudConfig>({ ...DEFAULT_CLOUD_CONFIG });
+  const [cloudConfig, setCloudConfig] = useState<AtmosphericCloudConfig>(createDefaultCloudConfig);
 
   // 7. Physics Engines Instances
   const stressManager = useMemo(() => new CrustalStressManager(48), []);
@@ -130,7 +92,7 @@ export default function App() {
   const [streamlineDensity, setStreamlineDensity] = useState<number>(28);
   const [layerVisibility, setLayerVisibility] = useState<LayerVisibilityConfig>(DEFAULT_LAYER_VISIBILITY);
 
-  const [activeControlTab, setActiveControlTab] = useState<'earth' | 'sources' | 'solar' | 'cloud' | 'moon' | 'stress' | 'presets' | 'weather'>('presets');
+  const [activeControlTab, setActiveControlTab] = useState<'earth' | 'sources' | 'solar' | 'cloud' | 'aerosol' | 'moon' | 'stress' | 'presets' | 'weather'>('presets');
   const [isPythonModalOpen, setIsPythonModalOpen] = useState<boolean>(false);
   const [latestEarthquake, setLatestEarthquake] = useState<EarthquakeEvent | null>(null);
 
@@ -159,6 +121,9 @@ export default function App() {
         imfBz: -2.4, // Strong southward reconnection
         speed: 2.2,
         density: 2.0,
+        speedKmS: 700,
+        densityCm3: 4.64,
+        fieldVisualizationGain: DEFAULT_SOLAR_WIND.fieldVisualizationGain,
       });
       setMoonConfig((prev) => ({ ...prev, enabled: true, phaseAngleDeg: 180 }));
     } else if (presetKey === 'third_pole') {
@@ -191,7 +156,14 @@ export default function App() {
           orbitPhase: Math.PI,
         },
       ]);
-      setSolarWind((prev) => ({ ...prev, enabled: true, pressure: 1.2, imfBz: -0.5 }));
+      setSolarWind((prev) => ({
+        ...prev,
+        enabled: true,
+        pressure: 1.2,
+        imfBz: -0.5,
+        speedKmS: 380,
+        densityCm3: 4.97,
+      }));
     } else if (presetKey === 'comet_approach') {
       // 혜성 근접 시뮬레이션 프리셋
       setEarthConfig((prev) => ({ ...prev, moment: 2.2, tiltAngle: 12, reversed: false, x: 0, y: 0 }));
@@ -219,6 +191,9 @@ export default function App() {
         imfBz: -1.2,
         speed: 1.6,
         density: 1.4,
+        speedKmS: 500,
+        densityCm3: 4.3,
+        fieldVisualizationGain: DEFAULT_SOLAR_WIND.fieldVisualizationGain,
       });
       setCloudConfig((prev) => ({
         ...prev,
@@ -237,6 +212,9 @@ export default function App() {
         imfBz: -0.8,
         speed: 1.2,
         density: 1.2,
+        speedKmS: 450,
+        densityCm3: 4.13,
+        fieldVisualizationGain: DEFAULT_SOLAR_WIND.fieldVisualizationGain,
       });
       setMoonConfig({
         ...DEFAULT_MOON_CONFIG,
@@ -299,19 +277,17 @@ export default function App() {
 
   // Full Simulation Reset Functionality (기본값 복원 및 외부 자극 완전 제거)
   const handleResetSimulation = useCallback(() => {
-    setEarthConfig({ ...DEFAULT_EARTH_CONFIG });
+    setEarthConfig({ ...DEFAULT_EARTH_DIPOLE });
     setSources([]); // 모든 외부 자극원 제거
     setSolarWind({ ...DEFAULT_SOLAR_WIND }); // 외부 태양풍 자극 비활성화
     setMoonConfig({ ...DEFAULT_MOON_CONFIG }); // 달 정상 궤도 기본값 복원
-    setCloudConfig({ ...DEFAULT_CLOUD_CONFIG });
+    setCloudConfig(createDefaultCloudConfig());
     setWeatherData(GLOBAL_WEATHER_PRESETS[0].data); // 기본 대한민국 수원 기상데이터 복원
 
     // Crustal Stress Engine 초기화
     if (stressManager) {
-      stressManager.nodes.forEach((n) => {
-        n.accumulatedStress = 0.05 + Math.random() * 0.08;
-        n.ruptured = false;
-      });
+      stressManager.initNodes();
+      stressManager.earthquakes = [];
       stressManager.activeWaves = [];
     }
 
@@ -330,42 +306,44 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#0a0a0c] text-slate-200 flex flex-col font-sans selection:bg-cyan-500/30 selection:text-cyan-200 antialiased">
       {/* Top Main Navigation Header - High Density */}
-      <header className="h-14 px-3 md:px-5 bg-[#0f0f13]/95 backdrop-blur-md border-b border-[#1e1e24] flex items-center justify-between sticky top-0 z-40">
-        <div className="flex items-center gap-2.5">
+      <header className="h-14 px-3 md:px-5 bg-[#0f0f13]/95 backdrop-blur-md border-b border-[#1e1e24] flex items-center justify-between gap-3 sticky top-0 z-40">
+        <div className="flex min-w-0 flex-1 items-center gap-2.5">
           <div className="p-1.5 rounded-lg bg-[#14141b] border border-[#22222e] text-cyan-400 shadow-sm flex items-center justify-center">
             <Radio className="w-4 h-4" />
           </div>
-          <div>
-            <h1 className="text-xs md:text-sm font-bold text-slate-100 tracking-tight flex items-center gap-2">
-              <span>다극 자기장 상호작용 및 가상 지진운 시뮬레이션</span>
-              <span className="hidden sm:inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-mono font-semibold rounded bg-[#161622] text-cyan-400 border border-cyan-500/30 uppercase tracking-wider">
+          <div className="min-w-0">
+            <h1 className="min-w-0 text-xs md:text-sm font-bold text-slate-100 tracking-tight flex items-center gap-2">
+              <span className="truncate">다극 자기장 상호작용 및 가상 지진운 시뮬레이션</span>
+              <span className="hidden 2xl:inline-flex shrink-0 items-center gap-1 px-1.5 py-0.5 text-[9px] font-mono font-semibold rounded bg-[#161622] text-cyan-400 border border-cyan-500/30 uppercase tracking-wider">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                RK4 Vector Engine
+                Hypothesis / Control Engine
               </span>
             </h1>
-            <p className="text-[10px] text-slate-400 font-mono hidden sm:block">
-              Dipole Superposition · IMF Reconnection · Cloud Polarization · Crustal Stress Tensor
+            <p className="text-[10px] text-slate-400 font-mono hidden xl:block truncate">
+              Dipole Superposition · IMF Perturbation · Cloud Coupling Hypothesis · Synthetic Failure Index
             </p>
           </div>
         </div>
 
         {/* View Switchers & Export Actions */}
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-1.5 xl:gap-2">
           {/* Global Simulation Reset Button */}
           <button
             id="btn-global-reset-simulation"
+            aria-label="시뮬레이션 전체 리셋"
             onClick={handleResetSimulation}
             title="시뮬레이션을 기본값으로 리셋하고 모든 외부 자극원을 제거합니다"
             className="px-2.5 py-1 text-xs font-mono font-medium rounded-md bg-red-950/40 hover:bg-red-900/60 text-red-300 border border-red-500/30 transition-all flex items-center gap-1.5 shadow-sm active:scale-95"
           >
             <RotateCcw className="w-3.5 h-3.5 text-red-400" />
-            <span className="hidden sm:inline">시뮬레이션 리셋</span>
+            <span className="hidden xl:inline">시뮬레이션 리셋</span>
           </button>
 
           {/* 2D / 3D / Split Switcher */}
           <div className="flex items-center p-0.5 bg-[#0a0a0e] rounded-md border border-[#1e1e24] text-xs font-medium">
             <button
               id="view-mode-2d"
+              aria-pressed={viewMode === '2D'}
               onClick={() => setViewMode('2D')}
               className={`px-2.5 py-1 rounded transition-colors flex items-center gap-1.5 text-xs ${
                 viewMode === '2D'
@@ -378,6 +356,7 @@ export default function App() {
             </button>
             <button
               id="view-mode-3d"
+              aria-pressed={viewMode === '3D'}
               onClick={() => setViewMode('3D')}
               className={`px-2.5 py-1 rounded transition-colors flex items-center gap-1.5 text-xs ${
                 viewMode === '3D'
@@ -390,6 +369,7 @@ export default function App() {
             </button>
             <button
               id="view-mode-split"
+              aria-pressed={viewMode === 'split'}
               onClick={() => setViewMode('split')}
               className={`px-2.5 py-1 rounded transition-colors hidden md:flex items-center gap-1.5 text-xs ${
                 viewMode === 'split'
@@ -405,21 +385,22 @@ export default function App() {
           {/* Python Verification Exporter Button */}
           <button
             id="btn-open-python-modal"
+            aria-label="Python 수치 검증 열기"
             onClick={() => setIsPythonModalOpen(true)}
             className="px-2.5 py-1 text-xs font-mono font-medium rounded-md bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-500/30 transition-colors flex items-center gap-1.5 shadow-sm"
           >
             <FileCode className="w-3.5 h-3.5 text-emerald-400" />
-            <span className="hidden sm:inline">Python 수치 검증</span>
+            <span className="hidden xl:inline">Python 수치 검증</span>
           </button>
         </div>
       </header>
 
       {/* Main Grid Workspace - High Density */}
-      <main className="flex-1 p-3 md:p-4 grid grid-cols-1 lg:grid-cols-12 gap-3.5 max-w-[1880px] w-full mx-auto">
+      <main className="flex-1 p-3 md:p-4 grid grid-cols-1 lg:grid-cols-12 lg:items-start gap-3.5 max-w-[1880px] w-full mx-auto">
         {/* Left / Center Viewport Column (Canvas 2D / 3D) */}
         <div className="lg:col-span-7 xl:col-span-8 flex flex-col gap-3.5">
           {/* Main Visualizer Area */}
-          <div className="w-full h-[540px] md:h-[620px] rounded-lg border border-[#1e1e24] bg-[#0c0c10] overflow-hidden shadow-2xl shadow-black/80">
+          <div className="w-full h-[540px] md:h-[620px] lg:h-[calc(100vh-5.5rem)] lg:min-h-[32rem] lg:max-h-[620px] rounded-lg border border-[#1e1e24] bg-[#0c0c10] overflow-hidden shadow-2xl shadow-black/80">
             {viewMode === '2D' && (
               <SimulationCanvas2D
                 earthConfig={earthConfig}
@@ -448,12 +429,14 @@ export default function App() {
             )}
 
             {viewMode === '3D' && (
-              <Magnetosphere3DView
-                earthConfig={earthConfig}
-                sources={sources}
-                solarWind={solarWind}
-                cloudConfig={cloudConfig}
-              />
+              <Suspense fallback={<ViewLoadingFallback />}>
+                <Magnetosphere3DView
+                  earthConfig={earthConfig}
+                  sources={sources}
+                  solarWind={solarWind}
+                  cloudConfig={cloudConfig}
+                />
+              </Suspense>
             )}
 
             {viewMode === 'split' && (
@@ -482,12 +465,14 @@ export default function App() {
                   layerVisibility={layerVisibility}
                   setLayerVisibility={setLayerVisibility}
                 />
-                <Magnetosphere3DView
-                  earthConfig={earthConfig}
-                  sources={sources}
-                  solarWind={solarWind}
-                  cloudConfig={cloudConfig}
-                />
+                <Suspense fallback={<ViewLoadingFallback />}>
+                  <Magnetosphere3DView
+                    earthConfig={earthConfig}
+                    sources={sources}
+                    solarWind={solarWind}
+                    cloudConfig={cloudConfig}
+                  />
+                </Suspense>
               </div>
             )}
           </div>
@@ -497,7 +482,7 @@ export default function App() {
         </div>
 
         {/* Right Sidebar: Physics Control Deck */}
-        <div className="lg:col-span-5 xl:col-span-4 flex flex-col gap-3.5">
+        <aside aria-label="시뮬레이션 조건" className="lg:col-span-5 xl:col-span-4 flex min-h-0 flex-col gap-3.5 lg:sticky lg:top-[4.5rem]">
           {/* Controls Deck */}
           <PhysicsControls
             earthConfig={earthConfig}
@@ -519,12 +504,12 @@ export default function App() {
             activeTab={activeControlTab}
             setActiveTab={setActiveControlTab}
           />
-        </div>
+        </aside>
       </main>
 
       {/* Real-time Earthquake Alert Toast Banner */}
       {latestEarthquake && (
-        <div className="fixed bottom-4 right-4 z-50 p-3.5 bg-[#140a0c]/95 backdrop-blur-md rounded-lg border border-red-500/60 shadow-2xl shadow-black text-slate-200 flex items-center gap-3 animate-in slide-in-from-bottom duration-300 max-w-md">
+        <div role="status" aria-live="polite" className="fixed bottom-4 right-4 z-50 p-3.5 bg-[#140a0c]/95 backdrop-blur-md rounded-lg border border-red-500/60 shadow-2xl shadow-black text-slate-200 flex items-center gap-3 animate-in slide-in-from-bottom duration-300 max-w-md">
           <div className="p-2 rounded-md bg-red-600/90 text-white flex-shrink-0">
             <AlertOctagon className="w-5 h-5 animate-pulse" />
           </div>
@@ -536,20 +521,26 @@ export default function App() {
               </span>
             </div>
             <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
-              단층 노드 #{latestEarthquake.nodeIndex}에서 자기 변형 응력 임계 돌파로 탄성 파열 및 P/S 지진파가 방출되었습니다.
+              단층 노드 #{latestEarthquake.nodeIndex}의 합성 실패지수가 임계값을 넘어 가상 파열 및 P/S 파동이 생성되었습니다.
             </p>
           </div>
         </div>
       )}
 
       {/* Python Numerical Code Export Modal */}
-      <NumericalVerificationModal
-        isOpen={isPythonModalOpen}
-        onClose={() => setIsPythonModalOpen(false)}
-        earthConfig={earthConfig}
-        sources={sources}
-        solarWind={solarWind}
-      />
+      {isPythonModalOpen && (
+        <Suspense fallback={null}>
+          <NumericalVerificationModal
+            isOpen={isPythonModalOpen}
+            onClose={() => setIsPythonModalOpen(false)}
+            earthConfig={earthConfig}
+            sources={sources}
+            solarWind={solarWind}
+            cloudConfig={cloudConfig}
+            moonConfig={moonConfig}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

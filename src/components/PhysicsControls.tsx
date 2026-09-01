@@ -14,7 +14,10 @@ import {
   DEFAULT_SOLAR_WIND,
 } from '../types';
 import { CrustalStressManager } from '../physics/crustalStressEngine';
+import { EARTH_RADIUS_KM, computeSolarWindDynamicPressureNPa } from '../physics/physicsCalibration';
+import { computeWaveCloudDensity } from '../physics/magneticEngine';
 import { GlobalWeatherControl } from './GlobalWeatherControl';
+import { CernCloudAerosolControl } from './CernCloudAerosolControl';
 import {
   Activity,
   AlertTriangle,
@@ -39,6 +42,7 @@ import {
   Waves,
   Wind,
   CheckCircle2,
+  FlaskConical,
 } from 'lucide-react';
 
 interface PhysicsControlsProps {
@@ -58,8 +62,8 @@ interface PhysicsControlsProps {
   onEarthquakeTriggered?: (event: EarthquakeEvent) => void;
   onApplyPreset: (presetKey: string) => void;
   onResetSimulation?: () => void;
-  activeTab: 'earth' | 'moon' | 'sources' | 'solar' | 'cloud' | 'stress' | 'presets' | 'weather';
-  setActiveTab: (tab: 'earth' | 'moon' | 'sources' | 'solar' | 'cloud' | 'stress' | 'presets' | 'weather') => void;
+  activeTab: 'earth' | 'moon' | 'sources' | 'solar' | 'cloud' | 'aerosol' | 'stress' | 'presets' | 'weather';
+  setActiveTab: (tab: 'earth' | 'moon' | 'sources' | 'solar' | 'cloud' | 'aerosol' | 'stress' | 'presets' | 'weather') => void;
 }
 
 export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
@@ -86,6 +90,16 @@ export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
   const [newSourceStrength, setNewSourceStrength] = useState<number>(2.0);
   const [newCometActivity, setNewCometActivity] = useState<number>(2.5);
   const [newCometTailLen, setNewCometTailLen] = useState<number>(3.2);
+  const [, setStressModelRevision] = useState<number>(0);
+  const referenceWaveState = computeWaveCloudDensity(
+    earthConfig.x - earthConfig.radius * 1.5,
+    earthConfig.y,
+    earthConfig,
+    sources,
+    solarWind,
+    cloudConfig,
+    0
+  );
 
   const handleAddSource = () => {
     const id = `source-${Date.now()}`;
@@ -123,11 +137,15 @@ export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
       enabled: true,
       pressure: 3.5,
       imfBz: -2.2,
+      speedKmS: 750,
+      densityCm3: 3.72,
     }));
     setTimeout(() => {
       setSolarWind((prev) => ({
         ...prev,
-        pressure: Math.max(1.0, prev.pressure * 0.7),
+        pressure: DEFAULT_SOLAR_WIND.pressure,
+        speedKmS: DEFAULT_SOLAR_WIND.speedKmS,
+        densityCm3: DEFAULT_SOLAR_WIND.densityCm3,
       }));
     }, 4000);
   };
@@ -152,113 +170,161 @@ export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
   };
 
   const handleResetCloudNormal = () => {
-    setCloudConfig({ ...DEFAULT_CLOUD_CONFIG });
+    setCloudConfig((prev) => ({ ...DEFAULT_CLOUD_CONFIG, weatherData: prev.weatherData }));
   };
 
   return (
-    <div className="bg-[#0f0f13] border border-[#1e1e24] rounded-lg shadow-2xl flex flex-col text-slate-200 overflow-hidden">
-      {/* Navigation Tabs - High Density */}
-      <div className="flex items-center gap-1 p-1 bg-[#09090c] border-b border-[#1e1e24] overflow-x-auto no-scrollbar">
+    <div className="bg-[#0f0f13] border border-[#1e1e24] rounded-lg shadow-2xl flex min-h-0 flex-col text-slate-200 overflow-hidden lg:h-[calc(100vh-5.5rem)] lg:min-h-[32rem] lg:max-h-[calc(100vh-5.5rem)]">
+      {/* All condition categories stay visible; the selected panel scrolls independently. */}
+      <div role="tablist" aria-label="시뮬레이션 조건 범주" className="grid shrink-0 grid-cols-3 gap-1 p-1.5 bg-[#09090c] border-b border-[#1e1e24]">
         <button
           id="tab-presets"
+          role="tab"
+          aria-selected={activeTab === 'presets'}
+          aria-controls="physics-tab-panel"
+          title="시나리오 프리셋"
           onClick={() => setActiveTab('presets')}
-          className={`px-2.5 py-1.5 text-xs font-mono rounded transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+          className={`min-w-0 px-2 py-2 text-[11px] font-mono rounded transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap ${
             activeTab === 'presets'
               ? 'bg-[#181824] text-cyan-300 border border-[#2c2c3e] shadow-sm font-semibold'
               : 'text-slate-400 hover:text-slate-200 hover:bg-[#14141c]'
           }`}
         >
           <Sliders className="w-3.5 h-3.5 text-cyan-400" />
-          시나리오 프리셋
+          <span className="truncate">프리셋</span>
         </button>
         <button
           id="tab-earth"
+          role="tab"
+          aria-selected={activeTab === 'earth'}
+          aria-controls="physics-tab-panel"
+          title="지구 쌍극자"
           onClick={() => setActiveTab('earth')}
-          className={`px-2.5 py-1.5 text-xs font-mono rounded transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+          className={`min-w-0 px-2 py-2 text-[11px] font-mono rounded transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap ${
             activeTab === 'earth'
               ? 'bg-[#181824] text-cyan-300 border border-[#2c2c3e] shadow-sm font-semibold'
               : 'text-slate-400 hover:text-slate-200 hover:bg-[#14141c]'
           }`}
         >
           <Globe className="w-3.5 h-3.5 text-cyan-400" />
-          지구 쌍극자
+          <span className="truncate">지구</span>
         </button>
         <button
           id="tab-moon"
+          role="tab"
+          aria-selected={activeTab === 'moon'}
+          aria-controls="physics-tab-panel"
+          title="달 위성"
           onClick={() => setActiveTab('moon')}
-          className={`px-2.5 py-1.5 text-xs font-mono rounded transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+          className={`min-w-0 px-2 py-2 text-[11px] font-mono rounded transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap ${
             activeTab === 'moon'
               ? 'bg-[#181824] text-slate-100 border border-slate-500/40 shadow-sm font-semibold'
               : 'text-slate-400 hover:text-slate-200 hover:bg-[#14141c]'
           }`}
         >
           <Moon className="w-3.5 h-3.5 text-slate-300" />
-          달 위성 (Moon)
+          <span className="truncate">달</span>
         </button>
         <button
           id="tab-sources"
+          role="tab"
+          aria-selected={activeTab === 'sources'}
+          aria-controls="physics-tab-panel"
+          title="외부 자극원 및 혜성"
           onClick={() => setActiveTab('sources')}
-          className={`px-2.5 py-1.5 text-xs font-mono rounded transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+          className={`min-w-0 px-2 py-2 text-[11px] font-mono rounded transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap ${
             activeTab === 'sources'
               ? 'bg-[#181824] text-purple-300 border border-[#2c2c3e] shadow-sm font-semibold'
               : 'text-slate-400 hover:text-slate-200 hover:bg-[#14141c]'
           }`}
         >
           <Radio className="w-3.5 h-3.5 text-purple-400" />
-          외부 자극원 & 혜성 ({sources.filter((s) => s.active).length})
+          <span className="truncate">외부 자극 ({sources.filter((s) => s.active).length})</span>
         </button>
         <button
           id="tab-solar"
+          role="tab"
+          aria-selected={activeTab === 'solar'}
+          aria-controls="physics-tab-panel"
+          title="태양풍 및 IMF"
           onClick={() => setActiveTab('solar')}
-          className={`px-2.5 py-1.5 text-xs font-mono rounded transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+          className={`min-w-0 px-2 py-2 text-[11px] font-mono rounded transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap ${
             activeTab === 'solar'
               ? 'bg-[#181824] text-amber-300 border border-[#2c2c3e] shadow-sm font-semibold'
               : 'text-slate-400 hover:text-slate-200 hover:bg-[#14141c]'
           }`}
         >
           <Sun className="w-3.5 h-3.5 text-amber-400" />
-          태양풍 & IMF
+          <span className="truncate">태양풍</span>
         </button>
         <button
           id="tab-cloud"
+          role="tab"
+          aria-selected={activeTab === 'cloud'}
+          aria-controls="physics-tab-panel"
+          title="가상 지진운"
           onClick={() => setActiveTab('cloud')}
-          className={`px-2.5 py-1.5 text-xs font-mono rounded transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+          className={`min-w-0 px-2 py-2 text-[11px] font-mono rounded transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap ${
             activeTab === 'cloud'
               ? 'bg-[#181824] text-cyan-300 border border-[#2c2c3e] shadow-sm font-semibold'
               : 'text-slate-400 hover:text-slate-200 hover:bg-[#14141c]'
           }`}
         >
           <CloudSun className="w-3.5 h-3.5 text-cyan-400" />
-          가상 지진운
+          <span className="truncate">지진운</span>
         </button>
         <button
           id="tab-stress"
+          role="tab"
+          aria-selected={activeTab === 'stress'}
+          aria-controls="physics-tab-panel"
+          title="지각 응력 및 지진"
           onClick={() => setActiveTab('stress')}
-          className={`px-2.5 py-1.5 text-xs font-mono rounded transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+          className={`min-w-0 px-2 py-2 text-[11px] font-mono rounded transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap ${
             activeTab === 'stress'
               ? 'bg-[#181824] text-red-300 border border-[#2c2c3e] shadow-sm font-semibold'
               : 'text-slate-400 hover:text-slate-200 hover:bg-[#14141c]'
           }`}
         >
           <Activity className="w-3.5 h-3.5 text-red-400" />
-          지각 응력 & 지진
+          <span className="truncate">지각 응력</span>
+        </button>
+        <button
+          id="tab-aerosol"
+          role="tab"
+          aria-selected={activeTab === 'aerosol'}
+          aria-controls="physics-tab-panel"
+          title="CERN CLOUD 에어로졸 실험"
+          onClick={() => setActiveTab('aerosol')}
+          className={`min-w-0 px-2 py-2 text-[11px] font-mono rounded transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap ${
+            activeTab === 'aerosol'
+              ? 'bg-[#181824] text-violet-300 border border-violet-500/40 shadow-sm font-semibold'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-[#14141c]'
+          }`}
+        >
+          <FlaskConical className="w-3.5 h-3.5 text-violet-400" />
+          <span className="truncate">CLOUD 실험</span>
         </button>
         <button
           id="tab-weather"
+          role="tab"
+          aria-selected={activeTab === 'weather'}
+          aria-controls="physics-tab-panel"
+          title="세계 기상 연동"
           onClick={() => setActiveTab('weather')}
-          className={`px-2.5 py-1.5 text-xs font-mono rounded transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+          className={`min-w-0 px-2 py-2 text-[11px] font-mono rounded transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap ${
             activeTab === 'weather'
               ? 'bg-[#181824] text-emerald-300 border border-emerald-500/40 shadow-sm font-semibold'
               : 'text-slate-400 hover:text-slate-200 hover:bg-[#14141c]'
           }`}
         >
           <Wind className="w-3.5 h-3.5 text-emerald-400" />
-          세계 기상 연동 (수원/글로벌)
+          <span className="truncate">기상 연동</span>
         </button>
       </div>
 
       {/* Tab Panels Content */}
-      <div className="p-3 space-y-3 text-xs">
+      <div key={activeTab} id="physics-tab-panel" role="tabpanel" aria-labelledby={`tab-${activeTab}`} tabIndex={0} className="min-h-0 flex-1 overflow-y-auto overscroll-contain scroll-smooth p-3 space-y-3 text-xs [scrollbar-gutter:stable]">
         {/* GLOBAL WEATHER TAB */}
         {activeTab === 'weather' && (
           <GlobalWeatherControl
@@ -269,6 +335,10 @@ export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
             solarWind={solarWind}
             setSolarWind={setSolarWind}
           />
+        )}
+
+        {activeTab === 'aerosol' && (
+          <CernCloudAerosolControl cloudConfig={cloudConfig} setCloudConfig={setCloudConfig} />
         )}
 
         {/* PRESETS TAB */}
@@ -297,7 +367,7 @@ export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
             )}
 
             <p className="text-slate-400 text-[11px]">
-              천체 물리 상호작용 및 가상 지자기-지진-대기 연동 가설을 즉시 검증할 수 있는 표준 프리셋입니다.
+              천체 물리 기준선과 가상 지자기-지진-대기 결합 가설의 민감도를 비교하는 표준 프리셋입니다.
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
               <button
@@ -338,7 +408,7 @@ export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
                   <ChevronRight className="w-3.5 h-3.5 text-slate-500 group-hover:text-sky-400 transition-colors" />
                 </div>
                 <p className="text-[10px] text-slate-400 mt-0.5">
-                  승화 가스 코마·이온 꼬리·반자성 공동에 의한 태양풍 왜곡 및 대기 직교 파동 유도
+                  승화 가스 코마·이온 꼬리·반자성 공동 프록시와 가설적 대기 직교 파동 결합 비교
                 </p>
               </button>
 
@@ -352,7 +422,7 @@ export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
                   <ChevronRight className="w-3.5 h-3.5 text-slate-500 group-hover:text-indigo-400 transition-colors" />
                 </div>
                 <p className="text-[10px] text-slate-400 mt-0.5">
-                  보름달(180°) 자기권 꼬리 진입, 지구 조석 팽창(Tidal Bulge) 및 단층 임계 응력 촉발
+                  보름달(180°) 위상에서 가역적 조석 응력이 합성 단층 실패지수에 미치는 민감도 비교
                 </p>
               </button>
 
@@ -376,7 +446,7 @@ export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
                 className="p-2.5 bg-[#14141b] hover:bg-[#191924] border border-[#1e1e24] hover:border-red-500/40 rounded-md text-left transition-all group"
               >
                 <div className="font-semibold text-red-400 text-xs flex items-center justify-between">
-                  <span>6. 가상 지진운 & 지각 파열 유발</span>
+                  <span>6. 가상 지진운 & 합성 파열 결합 가설</span>
                   <ChevronRight className="w-3.5 h-3.5 text-slate-500 group-hover:text-red-400 transition-colors" />
                 </div>
                 <p className="text-[10px] text-slate-400 mt-0.5">
@@ -493,7 +563,7 @@ export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
                 </button>
               </div>
               <p className="text-[10px] text-slate-300 leading-relaxed">
-                달은 지구 질량의 약 1/81.3로 평균 거리 약 384,400 km (3.5 R_E)에서 공전합니다.
+                달의 실제 평균 중심 거리는 약 384,400 km, 즉 약 60.3 R_E입니다. 화면의 3.5 단위 궤도는 가시성을 위한 축척입니다.
                 <br />
                 • <strong>고체 지구 조석력(기조력)</strong>: 달의 중력 구배로 인해 지구 지각에 주기적인 인장/압축 응력(Δσ_tide)이 발생하여 지진 단층 파열에 기여합니다.
                 <br />
@@ -560,10 +630,9 @@ export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
 
                 <div className="p-2.5 bg-[#14141b] rounded-md border border-[#1e1e24]">
                   <div className="flex justify-between text-slate-300 mb-1">
-                    <span>달 궤도 반경 (Distance)</span>
+                    <span>화면 표시 궤도 반경</span>
                     <span className="font-mono text-sky-300 font-bold">
-                      {(moonConfig.orbitRadius ?? 3.5).toFixed(1)} R_E (약{' '}
-                      {Math.round((moonConfig.orbitRadius ?? 3.5) * 110000).toLocaleString()} km)
+                      {(moonConfig.orbitRadius ?? 3.5).toFixed(1)} world units
                     </span>
                   </div>
                   <input
@@ -579,17 +648,40 @@ export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
                     className="w-full accent-sky-400 cursor-pointer h-1.5 bg-[#09090c] rounded"
                   />
                   <div className="flex justify-between text-[9px] text-slate-400 mt-1 font-mono">
-                    <span>1.8 R_E (근지점 가상접근)</span>
-                    <span className="text-sky-300 font-bold">3.5 R_E (실제 평균 궤도)</span>
-                    <span>6.0 R_E (원거리)</span>
+                    <span>1.8 (화면상 근거리)</span>
+                    <span className="text-sky-300 font-bold">3.5 (기본 표시 축척)</span>
+                    <span>6.0 (화면상 원거리)</span>
                   </div>
                 </div>
 
                 <div className="p-2.5 bg-[#14141b] rounded-md border border-[#1e1e24]">
                   <div className="flex justify-between text-slate-300 mb-1">
-                    <span>고체 지구 조석력(기조력) 가중치</span>
+                    <span>조석 계산용 실제 거리</span>
                     <span className="font-mono text-sky-300 font-bold">
-                      {(moonConfig.tidalStressWeight ?? 0.25).toFixed(2)}
+                      {(moonConfig.physicalDistanceEarthRadii ?? 60.3).toFixed(1)} R_E (약{' '}
+                      {Math.round((moonConfig.physicalDistanceEarthRadii ?? 60.3) * EARTH_RADIUS_KM).toLocaleString()} km)
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="50"
+                    max="70"
+                    step="0.1"
+                    value={moonConfig.physicalDistanceEarthRadii ?? 60.3}
+                    onChange={(e) =>
+                      setMoonConfig &&
+                      setMoonConfig((prev) => ({ ...prev, physicalDistanceEarthRadii: parseFloat(e.target.value) }))
+                    }
+                    className="w-full accent-sky-400 cursor-pointer h-1.5 bg-[#09090c] rounded"
+                  />
+                  <div className="text-[10px] text-slate-400 mt-1">조석 항은 이 거리의 역세제곱에 비례하며 화면 궤도와 독립적으로 계산됩니다.</div>
+                </div>
+
+                <div className="p-2.5 bg-[#14141b] rounded-md border border-[#1e1e24]">
+                  <div className="flex justify-between text-slate-300 mb-1">
+                    <span>고체 지구 조석 응력 보정계수</span>
+                    <span className="font-mono text-sky-300 font-bold">
+                      {(moonConfig.tidalStressWeight ?? 1).toFixed(2)}
                     </span>
                   </div>
                   <input
@@ -597,7 +689,7 @@ export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
                     min="0.0"
                     max="1.0"
                     step="0.05"
-                    value={moonConfig.tidalStressWeight ?? 0.25}
+                    value={moonConfig.tidalStressWeight ?? 1}
                     onChange={(e) =>
                       setMoonConfig &&
                       setMoonConfig((prev) => ({ ...prev, tidalStressWeight: parseFloat(e.target.value) }))
@@ -605,7 +697,7 @@ export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
                     className="w-full accent-sky-400 cursor-pointer h-1.5 bg-[#09090c] rounded"
                   />
                   <div className="text-[10px] text-slate-400 mt-1">
-                    달의 기조력에 의한 지각 응력 변조율입니다. 삭망월(신월·보름) 축을 따라 단층 응력 축적이 가속됩니다.
+                    최대 약 4 kPa 범위의 가역적 조석 섭동에 곱하는 보정계수입니다. 조석 응력은 판구조 응력처럼 누적되지 않습니다.
                   </div>
                 </div>
 
@@ -673,7 +765,7 @@ export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
                 </button>
               </div>
               <p className="text-[10px] text-slate-300 leading-relaxed">
-                • <strong>단극/쌍극자</strong>: 우주 공간의 외부 자기 섭동원으로 지구 자기력선을 왜곡하고 Reconnection(X점)을 생성합니다.
+                • <strong>합성 극 프록시/쌍극자</strong>: 외부장 경계조건을 탐색하기 위한 입력입니다. 단극 프록시는 실제 자기 단극자의 존재를 뜻하지 않습니다.
                 <br />
                 • <strong>접근 혜성(Comet)</strong>: 태양 복사열로 승화된 가스 코마가 광전리(Photoionization)되어 태양풍 자기장에 플라즈마를 부하(Mass-loading)시킵니다. 핵 주변 반자성 공동(Diamagnetic cavity)과 긴 이온 꼬리가 지구 자기권과 대기 파동운을 간섭합니다.
               </p>
@@ -691,7 +783,7 @@ export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
                       : 'bg-[#0f0f15] text-slate-400 border-[#1e1e24]'
                   }`}
                 >
-                  N극 단극 (+q)
+                  합성 N극 프록시 (+q*)
                 </button>
                 <button
                   onClick={() => setNewSourceType('monopole_s')}
@@ -701,7 +793,7 @@ export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
                       : 'bg-[#0f0f15] text-slate-400 border-[#1e1e24]'
                   }`}
                 >
-                  S극 단극 (-q)
+                  합성 S극 프록시 (-q*)
                 </button>
                 <button
                   onClick={() => setNewSourceType('dipole')}
@@ -867,7 +959,7 @@ export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
                   className="px-2 py-0.5 bg-amber-950/60 hover:bg-amber-900/60 text-amber-300 border border-amber-500/40 rounded text-[10px] font-mono transition-colors flex items-center gap-1"
                 >
                   <RotateCcw className="w-2.5 h-2.5" />
-                  태양풍 기본값 복원 (1.0 nPa, 0.0 nT)
+                  태양풍 기본값 복원 (1.34 nPa, 0.0 nT)
                 </button>
               </div>
               <p className="text-[10px] text-slate-300 leading-relaxed">
@@ -911,9 +1003,17 @@ export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
               />
               <div className="flex justify-between text-[9px] text-slate-400 mt-1 font-mono">
                 <span>0.2 (극약)</span>
-                <span className="text-amber-300 font-bold">1.0 (평온 상태)</span>
+                <span className="text-amber-300 font-bold">1.34 (400 km/s, 5 cm⁻³)</span>
                 <span>4.5 (강력한 폭풍압축)</span>
               </div>
+              {solarWind.speedKmS !== undefined && solarWind.densityCm3 !== undefined && (
+                <div className="text-[10px] text-slate-400 mt-1.5">
+                  수신값 ρv²: {solarWind.densityCm3.toFixed(2)} cm⁻³ × {solarWind.speedKmS.toFixed(0)} km/s →{' '}
+                  <strong className="text-amber-300 font-mono">
+                    {computeSolarWindDynamicPressureNPa(solarWind.densityCm3, solarWind.speedKmS).toFixed(2)} nPa
+                  </strong>
+                </div>
+              )}
             </div>
 
             <div className="p-2.5 bg-[#14141b] rounded-md border border-[#1e1e24]">
@@ -970,9 +1070,9 @@ export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
                 </button>
               </div>
               <p className="text-[10px] text-slate-300 leading-relaxed">
-                지진 단층대의 압전·마찰 전기(Piezoelectric) 및 외부 자기 섭동에 의해 대기 중 전하 입자가 자기력선 직교 방향(B_perp)으로 선형 밴드(양떼구름) 형태로 정렬되는 가상 물리 모델입니다.
+                바람·Stokes 항력·난류 확산을 기준선으로 두고, 외부 자기 섭동이 하전 에어로졸의 유효 전기적 이동과 구름 밴드 대비를 바꾼다는 가설을 별도 결합항으로 시험합니다.
                 <br />
-                • <strong>외부 자극원 연동 게이팅</strong>: 외부 자극원(자기원·혜성·태양풍 CME) 총합이 설정 임계치 이상일 때만 양떼구름 지진운이 발현되며, 평상시에는 수원 관측소 등 <strong>실제 세계 기상 구름</strong>이 적용됩니다.
+                • <strong>대조군</strong>: 가설 결합을 끄면 자기장 유도 이동과 패턴 기여가 정확히 0이 되어 동일 기상 조건과 비교할 수 있습니다.
               </p>
             </div>
 
@@ -1012,7 +1112,7 @@ export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
 
             <div className="p-2.5 bg-[#14141b] rounded-md border border-[#1e1e24]">
               <div className="flex justify-between text-slate-300 mb-1">
-                <span>자기장 편광 정렬 감수율 (κ)</span>
+                <span>가설적 방향 정렬 응답률 (κ_h)</span>
                 <span className="font-mono text-cyan-400 font-bold">{cloudConfig.polarizationSusceptibility.toFixed(2)}</span>
               </div>
               <input
@@ -1025,6 +1125,38 @@ export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
                   setCloudConfig((prev) => ({ ...prev, polarizationSusceptibility: parseFloat(e.target.value) }))
                 }
                 className="w-full accent-cyan-400 h-1.5 bg-[#09090c] rounded"
+              />
+            </div>
+
+            <div className="p-2.5 bg-[#14141b] rounded-md border border-amber-700/40 space-y-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="font-medium text-amber-200 text-xs">자기–대기 가설 결합</div>
+                  <div className="text-[10px] text-slate-400">OFF는 기상·확산만 남는 무결합 대조군입니다.</div>
+                </div>
+                <button
+                  onClick={() => setCloudConfig((prev) => ({ ...prev, hypothesisEnabled: prev.hypothesisEnabled === false }))}
+                  className={`px-2.5 py-1 rounded text-xs font-mono border ${
+                    cloudConfig.hypothesisEnabled !== false
+                      ? 'bg-amber-700/30 text-amber-200 border-amber-500/50'
+                      : 'bg-emerald-900/30 text-emerald-300 border-emerald-500/40'
+                  }`}
+                >
+                  {cloudConfig.hypothesisEnabled !== false ? '가설 결합 ON' : '대조군 OFF'}
+                </button>
+              </div>
+              <div className="flex justify-between text-[11px] text-slate-300">
+                <span>무차원 결합계수 A_h</span>
+                <span className="font-mono text-amber-300">{(cloudConfig.hypothesisCoupling ?? 0.6).toFixed(2)}</span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={cloudConfig.hypothesisCoupling ?? 0.6}
+                onChange={(e) => setCloudConfig((prev) => ({ ...prev, hypothesisCoupling: parseFloat(e.target.value) }))}
+                className="w-full accent-amber-400 h-1.5 bg-[#09090c] rounded"
               />
             </div>
 
@@ -1060,15 +1192,15 @@ export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
                     <div className="flex justify-between text-slate-300 text-[11px]">
                       <span className="font-semibold text-cyan-300">지진운 발현 최소 외부자극 임계치</span>
                       <span className="font-mono text-cyan-400 font-bold">
-                        {(cloudConfig.externalStimulusThreshold ?? 0.5).toFixed(2)}
+                        {(cloudConfig.externalStimulusThreshold ?? 0.3).toFixed(2)}
                       </span>
                     </div>
                     <input
                       type="range"
                       min="0.1"
-                      max="3.0"
+                      max="1.0"
                       step="0.05"
-                      value={cloudConfig.externalStimulusThreshold ?? 0.5}
+                      value={cloudConfig.externalStimulusThreshold ?? 0.3}
                       onChange={(e) =>
                         setCloudConfig((prev) => ({ ...prev, externalStimulusThreshold: parseFloat(e.target.value) }))
                       }
@@ -1078,15 +1210,10 @@ export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
                       <span className="text-slate-400">
                         현재 외부자극도:{' '}
                         <strong className="text-slate-200 font-mono">
-                          {(
-                            sources.filter((s) => s.active).reduce((sum, s) => sum + s.strength, 0) +
-                            (solarWind.enabled ? solarWind.pressure * 0.5 : 0)
-                          ).toFixed(2)}
+                          {referenceWaveState.stimulusLevel.toFixed(2)}
                         </strong>
                       </span>
-                      {sources.filter((s) => s.active).reduce((sum, s) => sum + s.strength, 0) +
-                        (solarWind.enabled ? solarWind.pressure * 0.5 : 0) >=
-                      (cloudConfig.externalStimulusThreshold ?? 0.5) ? (
+                      {referenceWaveState.isStimulated ? (
                         <span className="px-1.5 py-0.5 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-500/30 font-bold font-mono flex items-center gap-1">
                           <CheckCircle2 className="w-3 h-3 text-emerald-400" />
                           지진운 발현 조건 충족
@@ -1103,15 +1230,15 @@ export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
                     <div className="flex justify-between text-slate-300 mb-1 text-[11px]">
                       <span>간섭 임계치 (I_th)</span>
                       <span className="font-mono text-cyan-400 font-bold">
-                        {(cloudConfig.interferenceThreshold ?? 0.85).toFixed(2)}
+                        {(cloudConfig.interferenceThreshold ?? 0.35).toFixed(2)}
                       </span>
                     </div>
                     <input
                       type="range"
                       min="0.2"
-                      max="2.0"
+                      max="1.0"
                       step="0.05"
-                      value={cloudConfig.interferenceThreshold ?? 0.85}
+                      value={cloudConfig.interferenceThreshold ?? 0.35}
                       onChange={(e) =>
                         setCloudConfig((prev) => ({ ...prev, interferenceThreshold: parseFloat(e.target.value) }))
                       }
@@ -1143,7 +1270,7 @@ export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
                     <div className="flex justify-between text-slate-300 mb-1 text-[11px]">
                       <span>양떼구름 파장 (λ)</span>
                       <span className="font-mono text-cyan-400 font-bold">
-                        {(cloudConfig.waveWavelength ?? 0.8).toFixed(2)} R_E
+                        {(cloudConfig.waveWavelength ?? 0.8).toFixed(2)} world units
                       </span>
                     </div>
                     <input
@@ -1293,8 +1420,28 @@ export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
               <p className="text-[10px] text-slate-300 leading-relaxed">
                 판구조론적 지각 노드(48개 단층 분할)에 축적되는 전단 응력 σ 모델입니다.
                 <br />
-                • <strong>복합 기전</strong>: 배경 지각 변형 + 지자기 압전 유도 응력 + <strong>달 고체 조석력 변조(Δσ_tide)</strong>가 합산되며, 쿨롱 파괴 기준(Coulomb Failure Criterion) σ ≥ σ_crit(0.85) 도달 시 모멘트 규모 M_w 4.5 ~ 7.8 지진이 파열됩니다.
+                • <strong>복합 기전</strong>: 판구조 하중이 누적되고, 달 조석과 자기 결합 가설은 가역적인 작은 섭동으로만 실패지수에 더해집니다. 파열 규모는 가정한 원형 파열 반경·3 MPa 응력강하에서 지진모멘트를 구한 합성값입니다.
               </p>
+            </div>
+
+            <div className="p-2.5 bg-[#14141b] rounded-md border border-amber-700/40 flex items-center justify-between">
+              <div>
+                <div className="font-medium text-amber-200 text-xs">지각 자기결합 가설항</div>
+                <div className="text-[10px] text-slate-400">OFF 시 판구조 하중+달 조석만 계산하는 대조군</div>
+              </div>
+              <button
+                onClick={() => {
+                  stressManager.magneticHypothesisEnabled = !stressManager.magneticHypothesisEnabled;
+                  setStressModelRevision((value) => value + 1);
+                }}
+                className={`px-2.5 py-1 rounded text-xs font-mono border ${
+                  stressManager.magneticHypothesisEnabled
+                    ? 'bg-amber-700/30 text-amber-200 border-amber-500/50'
+                    : 'bg-emerald-900/30 text-emerald-300 border-emerald-500/40'
+                }`}
+              >
+                {stressManager.magneticHypothesisEnabled ? '가설 결합 ON' : '대조군 OFF'}
+              </button>
             </div>
 
             <div className="p-2.5 bg-[#14141b] rounded-md border border-[#1e1e24] flex items-center justify-between">
@@ -1302,6 +1449,10 @@ export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
                 <div className="font-semibold text-amber-400 text-xs font-mono">최대 지각 응력 단층 노드 #{stressManager.maxStressNodeIndex}</div>
                 <div className="text-slate-200 font-mono text-xs font-bold mt-0.5">
                   현재 축적도: {(stressManager.maxStressValue * 100).toFixed(1)}% / 임계 파열점: {(stressManager.ruptureThreshold * 100).toFixed(0)}%
+                </div>
+                <div className="text-[10px] text-slate-400 mt-1 font-mono">
+                  조석 {(stressManager.nodes[stressManager.maxStressNodeIndex]?.tidalStressKPa ?? 0).toFixed(2)} kPa · 가설 자기응력{' '}
+                  {(stressManager.nodes[stressManager.maxStressNodeIndex]?.hypothesisStressMPa ?? 0).toFixed(4)} MPa
                 </div>
               </div>
               <button
@@ -1336,6 +1487,7 @@ export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
                           M_w {eq.magnitude}
                         </span>
                         <span className="text-slate-300">단층 #{eq.nodeIndex}</span>
+                        <span className="text-slate-500">r={eq.ruptureRadiusKm?.toFixed(1)} km · 합성</span>
                       </div>
                       <div className="text-slate-500">
                         {new Date(eq.timestamp).toLocaleTimeString()}

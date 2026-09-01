@@ -29,6 +29,8 @@ import {
   Thermometer,
   Wind,
   Zap,
+  AlertTriangle,
+  CheckCircle2,
 } from 'lucide-react';
 
 interface GlobalWeatherControlProps {
@@ -49,17 +51,20 @@ export function GlobalWeatherControl({
   setCloudConfig,
 }: GlobalWeatherControlProps) {
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'presets' | 'models' | 'custom' | 'sources'>('presets');
 
   // Handle Preset Selection
   const handleSelectPreset = (preset: WeatherStationPreset) => {
-    setWeatherData(preset.data);
-    applyWeatherToSimulation(preset.data, setSolarWind, setCloudConfig);
+    const presetData = { ...preset.data, isLive: false, dataStatus: 'preset' as const, dataWarnings: [] };
+    setWeatherData(presetData);
+    applyWeatherToSimulation(presetData, setSolarWind, setCloudConfig);
   };
 
   // Handle Live Fetch
   const handleFetchLive = async () => {
     setIsLoading(true);
+    setSyncError(null);
     try {
       const live = await fetchLiveGlobalWeather(
         weatherData.latitude,
@@ -70,7 +75,7 @@ export function GlobalWeatherControl({
       setWeatherData(live);
       applyWeatherToSimulation(live, setSolarWind, setCloudConfig);
     } catch (err) {
-      console.error('Error updating live weather:', err);
+      setSyncError(err instanceof Error ? err.message : '실시간 자료를 수신하지 못했습니다.');
     } finally {
       setIsLoading(false);
     }
@@ -79,7 +84,14 @@ export function GlobalWeatherControl({
   // Manual change handler
   const handleFieldChange = (field: keyof GlobalWeatherData, value: any) => {
     setWeatherData((prev) => {
-      const updated = { ...prev, [field]: value, isLive: false };
+      const updated = {
+        ...prev,
+        [field]: value,
+        isLive: false,
+        dataStatus: 'manual' as const,
+        dataWarnings: [],
+        liveSources: undefined,
+      };
       // If wind speed or direction changed, update u and v
       if (field === 'windSpeed' || field === 'windDirectionDeg') {
         const speed = field === 'windSpeed' ? value : updated.windSpeed;
@@ -233,7 +245,32 @@ export function GlobalWeatherControl({
             <span className="text-rose-300 font-bold">{weatherData.dstIndexNt} nT</span>
           </div>
         </div>
+        <div className="pt-1 border-t border-[#1a1a24] flex items-start gap-1.5 text-[10px]">
+          {weatherData.dataStatus === 'partial' ? (
+            <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0 text-amber-400" />
+          ) : (
+            <CheckCircle2 className="w-3 h-3 mt-0.5 shrink-0 text-slate-500" />
+          )}
+          <div>
+            <div className={weatherData.dataStatus === 'partial' ? 'text-amber-300' : 'text-slate-400'}>
+              {weatherData.dataStatus === 'partial'
+                ? '부분 실시간 자료 — 일부 값은 기준값입니다.'
+                : weatherData.isLive
+                  ? '전체 실시간 자료'
+                  : '프리셋 또는 수동 자료'}
+            </div>
+            {weatherData.dataWarnings?.length ? (
+              <div className="text-slate-500 mt-0.5">{weatherData.dataWarnings.join(' ')}</div>
+            ) : null}
+          </div>
+        </div>
       </div>
+
+      {syncError && (
+        <div role="alert" className="px-2.5 py-2 rounded border border-red-700/40 bg-red-950/30 text-[11px] text-red-200">
+          {syncError}
+        </div>
+      )}
 
       {/* Tab 1: Global Seismic Station Presets */}
       {activeTab === 'presets' && (

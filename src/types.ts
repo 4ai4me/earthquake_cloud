@@ -21,7 +21,8 @@ export interface ExternalMagneticSource {
 
 export interface MoonConfig {
   enabled: boolean;
-  orbitRadius: number; // 2.5 to 5.0 units (standard ~3.5, R_EM ~ 384,400 km)
+  orbitRadius: number; // display-only orbit radius in normalized world units
+  physicalDistanceEarthRadii?: number; // physical Earth-Moon center distance, mean ~60.3 R_E
   orbitPeriodDays: number; // 27.3217 days (sidereal month)
   phaseAngleDeg: number; // orbital position angle (0 to 360 deg)
   radius: number; // physical radius ~0.26 (relative to Earth 0.95, ~27% of R_E)
@@ -51,6 +52,9 @@ export interface SolarWindConfig {
   imfBz: number; // IMF Bz (southward < 0 triggers magnetic reconnection)
   speed: number; // solar wind flow velocity
   density: number; // particle density
+  speedKmS?: number; // measured/assumed bulk speed used for dynamic-pressure calculation
+  densityCm3?: number; // measured/assumed proton density used for dynamic-pressure calculation
+  fieldVisualizationGain?: number; // explicit display gain applied to nT-scale IMF vectors
 }
 
 export type InspectionViewMode = 'none' | 'cloud_density' | 'hotspot_mask' | 'cloud_vector_overlay' | 'split_3view';
@@ -82,6 +86,15 @@ export interface GlobalWeatherData {
   imfBzNt: number; // IMF Bz component (nT, <0 is southward reconnection)
   lastUpdated: string;
   isLive: boolean;
+  dataStatus?: 'preset' | 'live' | 'partial' | 'manual';
+  dataWarnings?: string[];
+  liveSources?: {
+    atmosphere: boolean;
+    kp: boolean;
+    solarWind: boolean;
+    imf: boolean;
+    dst: boolean;
+  };
   modelSourceInfo?: string;
 }
 
@@ -91,6 +104,29 @@ export interface GroundObserverConfig {
   altitudeKm: number; // cloud layer altitude (e.g. 5 to 12 km)
   fovDeg: number; // fish-eye field of view (e.g. 140 deg)
   azimuthOffsetDeg: number; // rotation offset in sky dome
+}
+
+export type CernCloudEnvironment = 'boundary_layer' | 'marine_polar' | 'upper_troposphere';
+
+export interface CernCloudAerosolConfig {
+  enabled: boolean;
+  environment: CernCloudEnvironment;
+  temperatureK: number;
+  pressureHpa: number;
+  relativeHumidityPercent: number;
+  ionPairProductionCm3S: number;
+  sulfuricAcidCm3: number;
+  ammoniaPptv: number;
+  dimethylaminePptv: number;
+  iodineOxoacidCm3: number;
+  ipOomCm3: number;
+  msaCm3: number;
+  condensationSinkS: number;
+  vaporExposureSeconds: number;
+  growthHours: number;
+  ccnSupersaturationPercent: number;
+  hygroscopicityKappa: number;
+  coupleToCloudBaseline: boolean;
 }
 
 export interface AtmosphericCloudConfig {
@@ -109,6 +145,9 @@ export interface AtmosphericCloudConfig {
   gradientWeight: number; // alpha for gradient term in I(x, y)
   cloudOpacity: number;
   viscosity: number;
+  hypothesisEnabled?: boolean; // false is the null/control run
+  hypothesisCoupling?: number; // dimensionless, testable magnetic-atmospheric coupling amplitude
+  turbulentDiffusivity?: number; // schematic world-unit^2 / simulation-second
   // Inspection and Perspective enhancements
   inspectionMode?: InspectionViewMode;
   perspectiveMode?: PerspectiveViewMode;
@@ -119,6 +158,7 @@ export interface AtmosphericCloudConfig {
   groundObserver?: GroundObserverConfig;
   weatherData?: GlobalWeatherData;
   useLiveWeather?: boolean;
+  aerosolExperiment?: CernCloudAerosolConfig;
 }
 
 export interface CrustalNode {
@@ -131,6 +171,9 @@ export interface CrustalNode {
   ruptureTime: number;
   lastMagnitude: number;
   depthKm: number;
+  failureIndex?: number; // normalized Coulomb-style proximity to failure
+  tidalStressKPa?: number; // reversible solid-Earth tide perturbation, not accumulated tectonic stress
+  hypothesisStressMPa?: number; // explicitly hypothetical magnetic coupling contribution
 }
 
 export interface EarthquakeEvent {
@@ -143,6 +186,10 @@ export interface EarthquakeEvent {
   peakStress: number;
   dominantFieldIntensity: number;
   cloudDensityAtEpicenter: number;
+  seismicMomentNm?: number;
+  ruptureRadiusKm?: number;
+  stressDropMPa?: number;
+  isSynthetic?: boolean;
 }
 
 export interface SimulationPreset {
@@ -220,22 +267,26 @@ export const DEFAULT_EARTH_DIPOLE: EarthDipoleConfig = {
 
 export const DEFAULT_SOLAR_WIND: SolarWindConfig = {
   enabled: false,
-  pressure: 1.0,
+  pressure: 1.34,
   imfBx: 0.0,
   imfBz: 0.0,
   speed: 1.0,
   density: 1.0,
+  speedKmS: 400,
+  densityCm3: 5,
+  fieldVisualizationGain: 1000,
 };
 
 export const DEFAULT_MOON_CONFIG: MoonConfig = {
   enabled: true,
   orbitRadius: 3.5,
+  physicalDistanceEarthRadii: 60.3,
   orbitPeriodDays: 27.32,
   phaseAngleDeg: 45,
   radius: 0.26,
   remanentMoment: 0.08,
   remanentAngle: 15,
-  tidalStressWeight: 0.25,
+  tidalStressWeight: 1.0,
   wakeCavityStrength: 0.7,
   showOrbit: true,
   showTidalBulge: true,
@@ -252,17 +303,40 @@ export const DEFAULT_CLOUD_CONFIG: AtmosphericCloudConfig = {
   showParticles: true,
   showCloudBands: true,
   showWaveClouds: true,
-  externalStimulusThreshold: 0.5,
-  interferenceThreshold: 0.85,
+  externalStimulusThreshold: 0.3,
+  interferenceThreshold: 0.35,
   sigmoidSteepness: 6.0,
   waveWavelength: 0.8,
   gradientWeight: 0.5,
   cloudOpacity: 0.85,
   viscosity: 0.08,
+  hypothesisEnabled: true,
+  hypothesisCoupling: 0.6,
+  turbulentDiffusivity: 0.00002,
   perspectiveMode: 'space_global',
   inspectionMode: 'none',
   gamma: 0.6,
   colorPalette: 'satellite_bone',
   useLiveWeather: false,
+  aerosolExperiment: {
+    enabled: true,
+    environment: 'boundary_layer',
+    temperatureK: 278,
+    pressureHpa: 965,
+    relativeHumidityPercent: 58,
+    ionPairProductionCm3S: 2,
+    sulfuricAcidCm3: 1e7,
+    ammoniaPptv: 5,
+    dimethylaminePptv: 0.2,
+    iodineOxoacidCm3: 1e5,
+    ipOomCm3: 0,
+    msaCm3: 0,
+    condensationSinkS: 0.002,
+    vaporExposureSeconds: 300,
+    growthHours: 12,
+    ccnSupersaturationPercent: 0.2,
+    hygroscopicityKappa: 0.3,
+    coupleToCloudBaseline: false,
+  },
 };
 

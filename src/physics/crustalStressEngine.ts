@@ -1,5 +1,6 @@
 import { CrustalNode, EarthDipoleConfig, EarthquakeEvent, ExternalMagneticSource, MoonConfig, SolarWindConfig } from '../types';
-import { computeTotalMagneticField, computeFieldGradient } from './magneticEngine';
+import { calculateEarthDipoleField, computeTotalMagneticField } from './magneticEngine';
+import { computeLunarTidalStressKPa, estimateSyntheticRupture } from './physicsCalibration';
 
 export interface SeismicWave {
   id: string;
@@ -20,9 +21,10 @@ export class CrustalStressManager {
   nodeCount: number = 48;
   maxStressNodeIndex: number = 0;
   maxStressValue: number = 0;
-  couplingCoefficient: number = 0.08; // alpha
-  gradientCoupling: number = 0.05; // beta
-  dissipationRate: number = 0.012; // gamma
+  tectonicLoadingRate: number = 0.0008; // normalized load per displayed second
+  magneticHypothesisCouplingMPa: number = 0.01;
+  magneticHypothesisEnabled: boolean = true;
+  characteristicFailureStressMPa: number = 3;
   ruptureThreshold: number = 0.85; // critical stress threshold
 
   constructor(nodeCount: number = 48) {
@@ -39,11 +41,14 @@ export class CrustalStressManager {
         angle,
         x: 0,
         y: 0,
-        accumulatedStress: 0.1 + Math.random() * 0.2, // initial background tectonic stress
+        accumulatedStress: 0.12 + 0.12 * (0.5 + 0.5 * Math.sin(i * 2.399963)),
         ruptured: false,
         ruptureTime: 0,
         lastMagnitude: 0,
-        depthKm: 10 + Math.floor(Math.random() * 30),
+        depthKm: 8 + ((i * 7) % 33),
+        failureIndex: 0,
+        tidalStressKPa: 0,
+        hypothesisStressMPa: 0,
       });
     }
   }
@@ -59,42 +64,37 @@ export class CrustalStressManager {
     let currentMax = 0;
     let maxIdx = 0;
 
-    const moonRad = moonConfig && moonConfig.enabled ? (moonConfig.phaseAngleDeg * Math.PI) / 180 : 0;
-    const moonTidalWeight = moonConfig && moonConfig.enabled ? (moonConfig.tidalStressWeight ?? 0.25) : 0;
-
     for (let i = 0; i < this.nodes.length; i++) {
       const node = this.nodes[i];
       const radius = earthConfig.radius;
       node.x = earthConfig.x + Math.cos(node.angle) * radius;
       node.y = earthConfig.y + Math.sin(node.angle) * radius;
 
-      // Magnetic field and gradient at crustal fault node
+      // Tectonic loading is the baseline. Reversible tide and hypothetical
+      // magnetic terms modify proximity to failure but are not accumulated.
       const field = computeTotalMagneticField(node.x, node.y, earthConfig, sources, solarWind, moonConfig);
-      const grad = computeFieldGradient(node.x, node.y, earthConfig, sources, solarWind, moonConfig);
+      const earthField = calculateEarthDipoleField(node.x, node.y, earthConfig);
+      const externalMagnitude = Math.hypot(field.bx - earthField.bx, field.by - earthField.by);
+      const earthMagnitude = Math.hypot(earthField.bx, earthField.by);
+      const perturbationRatio = externalMagnitude / Math.max(1e-9, earthMagnitude + externalMagnitude);
+      node.hypothesisStressMPa = this.magneticHypothesisEnabled
+        ? this.magneticHypothesisCouplingMPa * perturbationRatio
+        : 0;
+      node.tidalStressKPa = moonConfig ? computeLunarTidalStressKPa(node.angle, moonConfig) : 0;
 
-      // Magneto-piezoelectric / piezomagnetic stress influx
-      const magneticStressRate =
-        this.couplingCoefficient * (field.magnitude * field.magnitude) +
-        this.gradientCoupling * grad.gradMag;
-
-      // Solid Earth Tidal Gravitational Stress contribution:
-      // Delta sigma_tide ~ cos(2 * (phi - theta_moon))
-      const tidalModulation = moonTidalWeight * 0.06 * Math.cos(2 * (node.angle - moonRad));
-
-      // Continuous accumulation and viscoelastic dissipation
-      node.accumulatedStress += (magneticStressRate + tidalModulation - this.dissipationRate * node.accumulatedStress) * dt * 3.0;
-
-      // Clamp lower bound
-      if (node.accumulatedStress < 0.02) node.accumulatedStress = 0.02;
+      const heterogeneousLoading = this.tectonicLoadingRate * (0.8 + 0.4 * (0.5 + 0.5 * Math.sin(node.id * 1.73)));
+      node.accumulatedStress = Math.max(0.02, node.accumulatedStress + heterogeneousLoading * Math.max(0, dt));
+      const reversibleStressMPa = (node.tidalStressKPa / 1_000) + node.hypothesisStressMPa;
+      node.failureIndex = node.accumulatedStress + reversibleStressMPa / this.characteristicFailureStressMPa;
 
       // Track max stress
-      if (node.accumulatedStress > currentMax) {
-        currentMax = node.accumulatedStress;
+      if (node.failureIndex > currentMax) {
+        currentMax = node.failureIndex;
         maxIdx = i;
       }
 
       // Check rupture condition
-      if (node.accumulatedStress >= this.ruptureThreshold) {
+      if (node.failureIndex >= this.ruptureThreshold) {
         this.triggerRupture(node, field.magnitude, onEarthquakeTriggered);
       }
     }
@@ -119,7 +119,11 @@ export class CrustalStressManager {
     fieldIntensity: number,
     onEarthquakeTriggered?: (event: EarthquakeEvent) => void
   ) {
-    const magnitude = parseFloat((4.5 + Math.min(node.accumulatedStress, 1.5) * 2.8).toFixed(1));
+    const peakFailureIndex = node.failureIndex ?? node.accumulatedStress;
+    const ruptureRadiusKm = 2 + 18 * Math.max(0, Math.min(1, (peakFailureIndex - 0.45) / 0.65));
+    const stressDropMPa = 3;
+    const rupture = estimateSyntheticRupture(ruptureRadiusKm, stressDropMPa);
+    const magnitude = Number(rupture.momentMagnitude.toFixed(1));
     const now = Date.now();
 
     node.ruptured = true;
@@ -127,8 +131,9 @@ export class CrustalStressManager {
     node.lastMagnitude = magnitude;
 
     // Release stress down to baseline
-    const peakStress = node.accumulatedStress;
-    node.accumulatedStress = 0.15 + Math.random() * 0.1;
+    const peakStress = peakFailureIndex;
+    node.accumulatedStress = 0.14 + 0.06 * (0.5 + 0.5 * Math.sin(node.id * 3.17));
+    node.failureIndex = node.accumulatedStress;
 
     const event: EarthquakeEvent = {
       id: `EQ-${now}-${node.id}`,
@@ -139,7 +144,11 @@ export class CrustalStressManager {
       magnitude,
       peakStress,
       dominantFieldIntensity: fieldIntensity,
-      cloudDensityAtEpicenter: 0.85,
+      cloudDensityAtEpicenter: 0,
+      seismicMomentNm: rupture.seismicMomentNm,
+      ruptureRadiusKm,
+      stressDropMPa,
+      isSynthetic: true,
     };
 
     this.earthquakes.unshift(event);
@@ -177,6 +186,7 @@ export class CrustalStressManager {
 
   manualTriggerNode(nodeIndex: number, onEarthquakeTriggered?: (event: EarthquakeEvent) => void) {
     if (this.nodes[nodeIndex]) {
+      this.nodes[nodeIndex].failureIndex = Math.max(this.ruptureThreshold, this.nodes[nodeIndex].failureIndex ?? 0);
       this.triggerRupture(this.nodes[nodeIndex], 1.5, onEarthquakeTriggered);
     }
   }
@@ -184,6 +194,9 @@ export class CrustalStressManager {
   dischargeAllStress() {
     this.nodes.forEach((n) => {
       n.accumulatedStress = 0.1;
+      n.failureIndex = 0.1;
+      n.tidalStressKPa = 0;
+      n.hypothesisStressMPa = 0;
     });
   }
 }

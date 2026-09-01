@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import {
   AtmosphericCloudConfig,
   CrustalNode,
@@ -26,6 +26,8 @@ import {
 import { CloudParticleSystem } from '../physics/cloudParticleEngine';
 import { CrustalStressManager, SeismicWave } from '../physics/crustalStressEngine';
 import { GroundSkyDomeView } from './GroundSkyDomeView';
+import { computeMagneticPressureNPa } from '../physics/physicsCalibration';
+import { computeAerosolCloudBaselineMultiplier } from '../physics/cernCloudAerosolEngine';
 import { CloudInspectionSplitView } from './CloudInspectionSplitView';
 import { VisualElementsGuidePanel, DEFAULT_LAYER_VISIBILITY } from './VisualElementsGuidePanel';
 import {
@@ -111,6 +113,10 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
   const [internalLayerVisibility, setInternalLayerVisibility] = useState<LayerVisibilityConfig>(DEFAULT_LAYER_VISIBILITY);
   const currentLayers = layerVisibility || internalLayerVisibility;
   const updateLayers = setLayerVisibility || setInternalLayerVisibility;
+  const aerosolBaselineMultiplier = useMemo(
+    () => computeAerosolCloudBaselineMultiplier(cloudConfig.aerosolExperiment),
+    [cloudConfig.aerosolExperiment]
+  );
 
   // Viewport transformation
   const [zoom, setZoom] = useState<number>(75); // pixels per world unit
@@ -141,7 +147,7 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
 
   // Animation loop controls
   const [isPlaying, setIsPlaying] = useState<boolean>(true);
-  const [animationPhase, setAnimationPhase] = useState<number>(0);
+  const animationPhaseRef = useRef<number>(0);
   const [fps, setFps] = useState<number>(60);
   const fpsCounterRef = useRef<{ frames: number; lastTime: number }>({ frames: 0, lastTime: performance.now() });
 
@@ -204,8 +210,9 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
     let lastTimestamp = performance.now();
 
     const render = (now: number) => {
-      const dt = Math.min((now - lastTimestamp) / 1000, 0.05);
+      const dt = Math.max(0, Math.min((now - lastTimestamp) / 1000, 0.05));
       lastTimestamp = now;
+      let animationPhase = animationPhaseRef.current;
 
       // Update FPS counter
       fpsCounterRef.current.frames++;
@@ -216,12 +223,15 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
       }
 
       if (isPlaying) {
-        setAnimationPhase((prev) => (prev + dt * 1.5) % 1000);
+        animationPhase = (animationPhase + dt * 1.5) % 1000;
+        animationPhaseRef.current = animationPhase;
 
         // Update external orbiting sources (including Comets)
-        setSources((prev) =>
-          prev.map((s) => {
+        setSources((prev) => {
+          let changed = false;
+          const next = prev.map((s) => {
             if (s.active && s.orbiting && s.orbitRadius && s.orbitSpeed) {
+              changed = true;
               const currentPhase = (s.orbitPhase || 0) + s.orbitSpeed * dt;
               return {
                 ...s,
@@ -231,8 +241,9 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
               };
             }
             return s;
-          })
-        );
+          });
+          return changed ? next : prev;
+        });
 
         // Update Moon Orbit if autoOrbit enabled
         if (moonConfig?.enabled && moonConfig.autoOrbit && setMoonConfig) {
@@ -294,7 +305,7 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
 
             if (cloudConfig.inspectionMode === 'cloud_density' || cloudConfig.inspectionMode === 'cloud_vector_overlay') {
               // Blend natural meteorological cloud background with stimulated earthquake wave cloud patterns
-              const naturalDensity = computeNaturalWeatherCloudDensity(worldPos.wx, worldPos.wy, cloudConfig.weatherData, animationPhase);
+              const naturalDensity = computeNaturalWeatherCloudDensity(worldPos.wx, worldPos.wy, cloudConfig.weatherData, animationPhase, aerosolBaselineMultiplier);
               const combinedDensity = Math.max(waveData.density, naturalDensity * 0.7);
 
               if (combinedDensity > 0.01) {
@@ -446,9 +457,8 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
               metricVal = Math.min(1.0, field.magnitude / 3.5);
             } else if (heatmapMetric === 'magnetic_pressure') {
               const field = computeTotalMagneticField(worldPos.wx, worldPos.wy, earthConfig, sources, solarWind);
-              // B^2 / 2
-              const pMag = (field.magnitude * field.magnitude) * 0.5;
-              metricVal = Math.min(1.0, pMag / 4.0);
+              const pMagNPa = computeMagneticPressureNPa(field.magnitude);
+              metricVal = Math.min(1.0, pMagNPa / 500_000);
             } else if (heatmapMetric === 'gradient') {
               const grad = computeFieldGradient(worldPos.wx, worldPos.wy, earthConfig, sources, solarWind);
               metricVal = Math.min(1.0, grad.gradMag / 2.5);
@@ -629,7 +639,8 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
                 wx,
                 wy,
                 cloudConfig.weatherData,
-                animationPhase
+                animationPhase,
+                aerosolBaselineMultiplier
               );
 
               if (naturalDensity > 0.18) {
@@ -805,7 +816,7 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
           ctx.lineWidth = wave.type === 'P_wave' ? 3.0 : 2.0;
 
           ctx.beginPath();
-          ctx.arc(epic.cx, epic.cy, pixelRadius, 0, Math.PI * 2);
+          ctx.arc(epic.cx, epic.cy, Math.max(0, pixelRadius), 0, Math.PI * 2);
           ctx.stroke();
 
           // Wavefront ripples
@@ -1151,7 +1162,7 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
           const tagY = earthCanvas.cy + Math.sin(moonAngleRad + 0.25) * (moonDist * zoom);
           ctx.fillStyle = '#94a3b8';
           ctx.font = '9px monospace';
-          ctx.fillText('Lunar Orbit (r = 384,400 km)', tagX, tagY);
+          ctx.fillText('Moon display orbit (physical mean = 60.3 R_E)', tagX, tagY);
           ctx.restore();
         }
 
@@ -1379,7 +1390,6 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
     draggedSourceId,
     pan,
     zoom,
-    animationPhase,
     onEarthquakeTriggered,
     probeInfo,
   ]);
@@ -1472,7 +1482,7 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
     );
     const mask = computeHotspotMask(
       interf.intensity,
-      cloudConfig.interferenceThreshold ?? 0.85,
+      cloudConfig.interferenceThreshold ?? 0.35,
       cloudConfig.sigmoidSteepness ?? 6.0
     );
     const waveData = computeWaveCloudDensity(
@@ -1482,7 +1492,7 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
       sources,
       solarWind,
       cloudConfig,
-      animationPhase
+      animationPhaseRef.current
     );
 
     // Closest crustal node stress
@@ -1988,7 +1998,7 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
             <span className="text-slate-500">Coord (x, y):</span>
             <span className="text-right font-semibold">({probeInfo.worldX.toFixed(2)}, {probeInfo.worldY.toFixed(2)})</span>
             <span className="text-slate-500">|B_total|:</span>
-            <span className="text-right text-emerald-400 font-bold">{probeInfo.bMag.toFixed(3)} T</span>
+            <span className="text-right text-emerald-400 font-bold">{probeInfo.bMag.toFixed(3)} B*</span>
             <span className="text-slate-500">(Bx, By):</span>
             <span className="text-right">({probeInfo.bx.toFixed(2)}, {probeInfo.by.toFixed(2)})</span>
             <span className="text-slate-500">∇|B|:</span>

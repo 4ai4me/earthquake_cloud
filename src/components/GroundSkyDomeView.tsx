@@ -321,32 +321,8 @@ export function GroundSkyDomeView({
 
     animFrameRef.current = requestAnimationFrame(render);
 
-    const canvas = canvasRef.current;
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setCloudConfig((prev) => {
-        const currentFov = prev.groundObserver?.fovDeg ?? 140;
-        const nextFov = Math.max(60, Math.min(180, currentFov + (e.deltaY < 0 ? -5 : 5)));
-        return {
-          ...prev,
-          groundObserver: {
-            angleDeg: prev.groundObserver?.angleDeg ?? 45,
-            fovDeg: nextFov,
-          },
-        };
-      });
-    };
-
-    if (canvas) {
-      canvas.addEventListener('wheel', onWheel, { passive: false });
-    }
-
     return () => {
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
-      if (canvas) {
-        canvas.removeEventListener('wheel', onWheel);
-      }
     };
   }, [
     earthConfig,

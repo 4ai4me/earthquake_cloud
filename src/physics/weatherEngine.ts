@@ -1,5 +1,6 @@
 import type { Dispatch, SetStateAction } from 'react';
 import { GlobalWeatherData, WeatherModelProvider, SolarWindConfig, AtmosphericCloudConfig } from '../types';
+import { computeSolarWindDynamicPressureNPa } from './physicsCalibration';
 
 export interface WeatherStationPreset {
   id: string;
@@ -285,6 +286,31 @@ export function calculateDewPoint(tempC: number, rhPercent: number): number {
   return (b * alpha) / (a - alpha);
 }
 
+async function fetchJsonWithTimeout(url: string, timeoutMs: number = 8_000): Promise<unknown> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return await response.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function latestProductValue(data: unknown, field: string): number | undefined {
+  if (!Array.isArray(data) || data.length < 2 || !Array.isArray(data[0])) return undefined;
+  const fieldIndex = data[0].indexOf(field);
+  if (fieldIndex < 0) return undefined;
+  for (let index = data.length - 1; index >= 1; index--) {
+    const row = data[index];
+    if (!Array.isArray(row)) continue;
+    const value = Number(row[fieldIndex]);
+    if (Number.isFinite(value)) return value;
+  }
+  return undefined;
+}
+
 /**
  * Fetches real-time weather and space weather data via Open-Meteo & NOAA SWPC APIs
  */
@@ -294,6 +320,13 @@ export async function fetchLiveGlobalWeather(
   provider: WeatherModelProvider = 'NOAA_GFS',
   stationName: string = '사용자 지정 위치'
 ): Promise<GlobalWeatherData> {
+  if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) {
+    throw new Error('위도는 -90에서 90 사이의 유한한 숫자여야 합니다.');
+  }
+  if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+    throw new Error('경도는 -180에서 180 사이의 유한한 숫자여야 합니다.');
+  }
+
   let modelParam = 'gfs_seamless';
   let providerName = 'NOAA NCEP GFS';
   if (provider === 'ECMWF_IFS') {
@@ -304,7 +337,10 @@ export async function fetchLiveGlobalWeather(
     providerName = 'DWD ICON Global';
   }
 
-  // 1. Fetch Atmospheric Weather via Open-Meteo Public CORS API
+  const warnings: string[] = [];
+  const liveSources = { atmosphere: false, kp: false, solarWind: false, imf: false, dst: false };
+
+  // 1. Fetch atmospheric weather via Open-Meteo Public CORS API.
   let tempC = 18.0;
   let rh = 65.0;
   let pressureHpa = 1013.25;
@@ -313,49 +349,70 @@ export async function fetchLiveGlobalWeather(
   let cloudCover = 50.0;
 
   try {
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${latitude.toFixed(4)}&longitude=${longitude.toFixed(4)}&current=temperature_2m,relative_humidity_2m,surface_pressure,wind_speed_10m,wind_direction_10m,cloud_cover&models=${modelParam}`;
-    const res = await fetch(url);
-    if (res.ok) {
-      const data = await res.json();
-      if (data.current) {
-        tempC = data.current.temperature_2m ?? tempC;
-        rh = data.current.relative_humidity_2m ?? rh;
-        pressureHpa = data.current.surface_pressure ?? pressureHpa;
-        windSpeed = data.current.wind_speed_10m ?? windSpeed;
-        windDir = data.current.wind_direction_10m ?? windDir;
-        cloudCover = data.current.cloud_cover ?? cloudCover;
-      }
-    }
-  } catch (err) {
-    console.warn('Open-Meteo live weather fetch failed, utilizing model interpolation:', err);
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${latitude.toFixed(4)}&longitude=${longitude.toFixed(4)}&current=temperature_2m,relative_humidity_2m,surface_pressure,wind_speed_10m,wind_direction_10m,cloud_cover&wind_speed_unit=ms&models=${modelParam}`;
+    const data = (await fetchJsonWithTimeout(url)) as { current?: Record<string, unknown> };
+    if (!data.current) throw new Error('current weather data missing');
+    const numeric = (key: string, fallback: number) => {
+      const value = Number(data.current?.[key]);
+      return Number.isFinite(value) ? value : fallback;
+    };
+    tempC = numeric('temperature_2m', tempC);
+    rh = numeric('relative_humidity_2m', rh);
+    pressureHpa = numeric('surface_pressure', pressureHpa);
+    windSpeed = numeric('wind_speed_10m', windSpeed);
+    windDir = numeric('wind_direction_10m', windDir);
+    cloudCover = numeric('cloud_cover', cloudCover);
+    liveSources.atmosphere = true;
+  } catch {
+    warnings.push('대기 기상 자료를 받지 못해 안전한 기본값을 유지했습니다.');
   }
 
-  // 2. Fetch NOAA Space Weather Realtime Kp / Solar Wind
+  // 2. Fetch each NOAA SWPC product independently. Never derive unrelated measurements from Kp.
   let kp = 3.0;
   let dst = -15;
   let swSpeed = 420;
   let swDensity = 5.0;
   let imfBz = -1.5;
 
-  try {
-    const kpRes = await fetch('https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json');
-    if (kpRes.ok) {
-      const kpData = await kpRes.json();
-      if (Array.isArray(kpData) && kpData.length > 1) {
-        const latest = kpData[kpData.length - 1];
-        const val = parseFloat(latest[1]);
-        if (!isNaN(val)) {
-          kp = Math.max(0, Math.min(9, val));
-          // Derive Dst & Solar Wind from real Kp
-          dst = Math.round(-10 - kp * 14.5);
-          swSpeed = Math.round(340 + kp * 45);
-          swDensity = parseFloat((3.0 + kp * 1.5).toFixed(1));
-          imfBz = parseFloat((-0.5 - kp * 0.8).toFixed(1));
-        }
-      }
+  const [kpResult, plasmaResult, magResult] = await Promise.allSettled([
+    fetchJsonWithTimeout('https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json'),
+    fetchJsonWithTimeout('https://services.swpc.noaa.gov/products/solar-wind/plasma-7-day.json'),
+    fetchJsonWithTimeout('https://services.swpc.noaa.gov/products/solar-wind/mag-7-day.json'),
+  ]);
+
+  if (kpResult.status === 'fulfilled') {
+    const value = latestProductValue(kpResult.value, 'Kp') ?? latestProductValue(kpResult.value, 'kp');
+    if (value !== undefined) {
+      kp = Math.max(0, Math.min(9, value));
+      liveSources.kp = true;
     }
-  } catch (err) {
-    console.warn('NOAA SWPC live Kp fetch fallback to quiet-to-moderate index:', err);
+  }
+  if (!liveSources.kp) warnings.push('NOAA Kp 자료를 받지 못해 기존 기준값을 사용했습니다.');
+
+  if (plasmaResult.status === 'fulfilled') {
+    const speed = latestProductValue(plasmaResult.value, 'speed');
+    const density = latestProductValue(plasmaResult.value, 'density');
+    if (speed !== undefined && density !== undefined) {
+      swSpeed = speed;
+      swDensity = density;
+      liveSources.solarWind = true;
+    }
+  }
+  if (!liveSources.solarWind) warnings.push('NOAA 태양풍 속도·밀도 자료를 받지 못해 기존 기준값을 사용했습니다.');
+
+  if (magResult.status === 'fulfilled') {
+    const bz = latestProductValue(magResult.value, 'bz_gsm');
+    if (bz !== undefined) {
+      imfBz = bz;
+      liveSources.imf = true;
+    }
+  }
+  if (!liveSources.imf) warnings.push('NOAA IMF Bz 자료를 받지 못해 기존 기준값을 사용했습니다.');
+  warnings.push('Dst는 실시간 수신값이 아니므로 기준값으로 표시됩니다.');
+
+  const liveCount = Object.values(liveSources).filter(Boolean).length;
+  if (liveCount === 0) {
+    throw new Error('실시간 기상·우주기상 자료를 모두 수신하지 못했습니다. 현재 화면 값은 변경되지 않았습니다.');
   }
 
   const { u, v } = calculateWindUV(windSpeed, windDir);
@@ -377,12 +434,15 @@ export async function fetchLiveGlobalWeather(
     dewPointC: parseFloat(dewPoint.toFixed(1)),
     kpIndex: parseFloat(kp.toFixed(1)),
     dstIndexNt: dst,
-    solarWindSpeedKmS: swSpeed,
-    solarWindDensityCm3: swDensity,
-    imfBzNt: imfBz,
-    lastUpdated: new Date().toLocaleTimeString(),
-    isLive: true,
-    modelSourceInfo: `${providerName} 실시간 피드 및 NOAA SWPC 우주기상 인덱스`,
+    solarWindSpeedKmS: parseFloat(swSpeed.toFixed(1)),
+    solarWindDensityCm3: parseFloat(swDensity.toFixed(2)),
+    imfBzNt: parseFloat(imfBz.toFixed(2)),
+    lastUpdated: new Date().toISOString(),
+    isLive: Object.values(liveSources).every(Boolean),
+    dataStatus: warnings.length === 0 ? 'live' : 'partial',
+    dataWarnings: warnings,
+    liveSources,
+    modelSourceInfo: `${providerName} (Open-Meteo) · NOAA SWPC Kp/태양풍/IMF 개별 수신`,
   };
 }
 
@@ -394,11 +454,13 @@ export function applyWeatherToSimulation(
   setSolarWind: Dispatch<SetStateAction<SolarWindConfig>>,
   setCloudConfig: Dispatch<SetStateAction<AtmosphericCloudConfig>>
 ) {
-  // 1. Modulate Solar Wind dynamic pressure and IMF Bz from space weather indices (Kp, Dst)
+  // 1. Compute proton ram pressure from independently measured density and speed.
   setSolarWind((prev) => {
-    // Dynamic pressure P_dyn = 0.5 + 0.45 * Kp
-    const pressure = Math.max(0.2, Math.min(6.0, 0.4 + weather.kpIndex * 0.5));
-    const speed = Math.max(0.5, Math.min(3.5, weather.solarWindSpeedKmS / 300));
+    const pressure = Math.max(
+      0.05,
+      Math.min(20, computeSolarWindDynamicPressureNPa(weather.solarWindDensityCm3, weather.solarWindSpeedKmS))
+    );
+    const speed = Math.max(0.5, Math.min(3.5, weather.solarWindSpeedKmS / 400));
     const density = Math.max(0.4, Math.min(4.0, weather.solarWindDensityCm3 / 5.0));
     const imfBz = weather.imfBzNt;
 
@@ -408,6 +470,8 @@ export function applyWeatherToSimulation(
       pressure,
       speed,
       density,
+      speedKmS: weather.solarWindSpeedKmS,
+      densityCm3: weather.solarWindDensityCm3,
       imfBz,
     };
   });
@@ -421,7 +485,7 @@ export function applyWeatherToSimulation(
     return {
       ...prev,
       weatherData: weather,
-      useLiveWeather: true,
+      useLiveWeather: weather.dataStatus === 'live' || weather.dataStatus === 'partial',
       condensationThreshold,
       cloudOpacity,
       showCloudBands: true,

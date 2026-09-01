@@ -1,4 +1,5 @@
 import { EarthDipoleConfig, ExternalMagneticSource, MoonConfig, SolarWindConfig } from '../types';
+import { EARTH_EQUATORIAL_FIELD_NT } from './physicsCalibration';
 
 export const EPSILON = 0.05; // Regularizer to prevent division by zero at singularities
 
@@ -14,15 +15,8 @@ export function calculateEarthDipoleField(
   const dx = x - config.x;
   const dy = y - config.y;
   const rSquared = dx * dx + dy * dy;
-  const r = Math.sqrt(rSquared) + EPSILON;
+  const r = Math.sqrt(rSquared + EPSILON * EPSILON);
   const r5 = Math.pow(r, 5);
-
-  // If tilt angle is 0, use direct standard formula
-  if (Math.abs(config.tiltAngle) < 0.01) {
-    const bx = (3 * effectiveMoment * dx * dy) / r5;
-    const by = (effectiveMoment * (2 * dy * dy - dx * mechanicalMoment(effectiveMoment, dx, dy))) / r5;
-    return { bx, by };
-  }
 
   // Rotate to dipole-aligned frame
   const rad = (config.tiltAngle * Math.PI) / 180;
@@ -42,10 +36,6 @@ export function calculateEarthDipoleField(
   return { bx, by };
 }
 
-function mechanicalMoment(m: number, dx: number, dy: number): number {
-  return dx * dx;
-}
-
 /**
  * Calculates External Magnetic Source Field (Monopole, Dipole, or Approaching Comet) at point (x, y)
  */
@@ -59,7 +49,7 @@ export function calculateExternalSourceField(
   const dx = x - source.x;
   const dy = y - source.y;
   const rSquared = dx * dx + dy * dy;
-  const r = Math.sqrt(rSquared) + EPSILON;
+  const r = Math.sqrt(rSquared + EPSILON * EPSILON);
 
   if (source.type === 'monopole_n' || source.type === 'monopole_s') {
     // Monopole approximation: B = q_m * r_vec / r^3
@@ -133,23 +123,14 @@ export function calculateSolarWindField(
 ): { bx: number; by: number } {
   if (!solarWind.enabled) return { bx: 0, by: 0 };
 
-  // Base uniform IMF background
-  let bx = solarWind.imfBx * 0.15;
-  let by = solarWind.imfBz * 0.15; // Bz < 0 triggers southward reconnection
-
-  // Day-side compression effect (Sun is on the left x < 0)
-  const dx = x - earthConfig.x;
-  const dy = y - earthConfig.y;
-  const dist = Math.sqrt(dx * dx + dy * dy);
-
-  if (dx < 0 && dist > earthConfig.radius) {
-    // Upstream dynamic pressure compresses dayside magnetopause
-    const compression = (solarWind.pressure * 0.3) / Math.pow(dist + 0.5, 2);
-    bx += compression * Math.abs(dx / dist);
-    by += compression * (dy / dist) * 0.5;
-  }
-
-  return { bx, by };
+  // IMF inputs are nT, whereas the renderer uses an Earth-surface-normalized field.
+  // The explicit gain keeps nT-scale vectors visible; pressure changes the
+  // magnetopause boundary (Shue model), not the magnetic vector by itself.
+  const displayGain = Math.max(1, solarWind.fieldVisualizationGain ?? 1_000);
+  return {
+    bx: (solarWind.imfBx / EARTH_EQUATORIAL_FIELD_NT) * displayGain,
+    by: (solarWind.imfBz / EARTH_EQUATORIAL_FIELD_NT) * displayGain,
+  };
 }
 
 /**
@@ -173,7 +154,7 @@ export function calculateMoonField(
   const dx = x - moonX;
   const dy = y - moonY;
   const rSquared = dx * dx + dy * dy;
-  const r = Math.sqrt(rSquared) + EPSILON;
+  const r = Math.sqrt(rSquared + EPSILON * EPSILON);
   const r5 = Math.pow(r, 5);
 
   // 1. Lunar Remanent Crustal Dipole (Reiner Gamma-like swirl dipole)
@@ -393,8 +374,8 @@ export function findNeutralPoints(
 }
 
 /**
- * ① 국소 간섭 강도 지표 (Interference Intensity):
- * I(x, y) = |B_earth x B_ext| + alpha * |grad |B_total||
+ * Dimensionless magnetic-perturbation diagnostic. The raw cross product and
+ * field gradient have different units, so they must not be added directly.
  */
 export function computeInterferenceIntensity(
   x: number,
@@ -406,6 +387,9 @@ export function computeInterferenceIntensity(
 ): {
   intensity: number;
   crossProductMag: number;
+  shearAngleFactor: number;
+  externalFieldRatio: number;
+  normalizedGradient: number;
   gradMag: number;
   earthField: { bx: number; by: number };
   extField: { bx: number; by: number };
@@ -429,18 +413,32 @@ export function computeInterferenceIntensity(
   extBx += sw.bx;
   extBy += sw.by;
 
-  // 3. 2D Cross Product Magnitude: |B_earth x B_ext| = |B_earth,x * B_ext,y - B_earth,y * B_ext,x|
+  // 3. Dimensionless field shear and perturbation ratio.
   const crossProductMag = Math.abs(earthField.bx * extBy - earthField.by * extBx);
+  const earthMag = Math.hypot(earthField.bx, earthField.by);
+  const extMag = Math.hypot(extBx, extBy);
+  const totalMag = Math.hypot(earthField.bx + extBx, earthField.by + extBy);
+  const shearAngleFactor = crossProductMag / Math.max(1e-9, earthMag * extMag);
+  const externalFieldRatio = extMag / Math.max(1e-9, earthMag + extMag);
 
   // 4. Spatial gradient of composite total field
   const grad = computeFieldGradient(x, y, earthConfig, sources, solarWind);
 
-  // 5. Total Interference Intensity
-  const intensity = crossProductMag + alpha * grad.gradMag;
+  // 5. L*|grad B|/|B| is dimensionless. tanh prevents singular gradients
+  // near synthetic sources from dominating the diagnostic.
+  const normalizedGradient = Math.tanh((Math.max(0.1, earthConfig.radius) * grad.gradMag) / Math.max(1e-6, totalMag));
+  const gradientWeight = Math.max(0, Math.min(1, alpha));
+  const intensity = Math.max(
+    0,
+    Math.min(1, externalFieldRatio * ((1 - gradientWeight) * shearAngleFactor + gradientWeight * normalizedGradient))
+  );
 
   return {
     intensity,
     crossProductMag,
+    shearAngleFactor,
+    externalFieldRatio,
+    normalizedGradient,
     gradMag: grad.gradMag,
     earthField,
     extField: { bx: extBx, by: extBy },
@@ -482,6 +480,9 @@ export function computeWaveCloudDensity(
     waveWavelength?: number;
     gradientWeight?: number;
     externalStimulusThreshold?: number;
+    hypothesisEnabled?: boolean;
+    hypothesisCoupling?: number;
+    weatherData?: { windU?: number; windV?: number };
   },
   time: number = 0
 ): {
@@ -496,26 +497,27 @@ export function computeWaveCloudDensity(
   kPerpX: number;
   kPerpY: number;
   wavePhase: number;
+  hypothesisContribution: number;
 } {
   const alpha = cloudConfig.gradientWeight ?? 0.5;
   const threshold = cloudConfig.interferenceThreshold ?? 0.35;
   const steepness = cloudConfig.sigmoidSteepness ?? 10.0;
   const wavelength = Math.max(0.05, cloudConfig.waveWavelength ?? 0.3);
-  const minStimulus = cloudConfig.externalStimulusThreshold ?? 0.5;
+  const minStimulus = cloudConfig.externalStimulusThreshold ?? 0.3;
 
   // Compute field & interference
   const field = computeTotalMagneticField(x, y, earthConfig, sources, solarWind);
   const interf = computeInterferenceIntensity(x, y, earthConfig, sources, solarWind, alpha);
 
-  // Calculate external stimulus level (sources + external field + space weather perturbations)
-  const activeSources = sources.filter((s) => s.active && Math.abs(s.strength) > 0.001);
-  const totalSourceStrength = activeSources.reduce((sum, s) => sum + Math.abs(s.strength), 0);
-  const extFieldMag = Math.hypot(interf.extField.bx, interf.extField.by);
-  const swStormPerturb = solarWind.enabled
-    ? Math.max(0, solarWind.pressure - 1.2) * 0.5 + Math.max(0, Math.abs(solarWind.imfBz) - 2.0) * 0.25
+  // The driver is dimensionless and based on the local external/total ratio,
+  // angular shear, and bounded space-weather conditions—not source UI values.
+  const spaceWeatherDriver = solarWind.enabled
+    ? Math.min(1, 0.5 * (solarWind.pressure / 5) + 0.5 * (Math.max(0, -solarWind.imfBz) / 20))
     : 0;
-
-  const stimulusLevel = totalSourceStrength * 0.75 + extFieldMag * 1.6 + swStormPerturb;
+  const stimulusLevel = Math.min(
+    1,
+    0.7 * interf.externalFieldRatio + 0.2 * interf.shearAngleFactor + 0.1 * spaceWeatherDriver
+  );
   const isStimulated = stimulusLevel >= minStimulus;
 
   let mask = computeHotspotMask(interf.intensity, threshold, steepness);
@@ -523,7 +525,7 @@ export function computeWaveCloudDensity(
   // If external stimulus is below threshold, suppress the seismic wave cloud mask
   if (stimulusLevel < minStimulus) {
     const attenuation = Math.max(0, Math.min(1, stimulusLevel / Math.max(0.01, minStimulus)));
-    mask *= Math.pow(attenuation, 3.5); // Steep cutoff to 0
+    mask *= attenuation * attenuation;
   }
 
   if (field.magnitude < 1e-4) {
@@ -539,6 +541,7 @@ export function computeWaveCloudDensity(
       kPerpX: 0,
       kPerpY: 0,
       wavePhase: 0,
+      hypothesisContribution: 0,
     };
   }
 
@@ -555,15 +558,22 @@ export function computeWaveCloudDensity(
   const kPerpX = kMag * nPerpX;
   const kPerpY = kMag * nPerpY;
 
-  // Spatial phase: k_perp · r - omega*t
+  // Spatial phase with a simple advected wave speed. This is a pattern
+  // hypothesis, not a claim that the magnetic field creates gravity waves.
   const spatialPhase = kPerpX * x + kPerpY * y;
-  const wavePhase = spatialPhase - time * 1.5;
+  const windProjection =
+    (cloudConfig.weatherData?.windU ?? 0) * nPerpX + (cloudConfig.weatherData?.windV ?? 0) * nPerpY;
+  const angularFrequency = kMag * Math.max(-0.2, Math.min(0.2, windProjection * 0.002 + 0.03));
+  const wavePhase = spatialPhase - time * angularFrequency;
 
   // Periodic wave value in [0, 1]
   const waveFactor = (1 + Math.cos(wavePhase)) / 2;
 
-  // Modulated wave cloud density C(x, y)
-  const density = mask * waveFactor;
+  // The null/control run is exactly zero. The coupled run exposes a bounded,
+  // dimensionless coefficient so sensitivity can be measured and falsified.
+  const coupling = cloudConfig.hypothesisEnabled === false ? 0 : Math.max(0, Math.min(1, cloudConfig.hypothesisCoupling ?? 0.6));
+  const hypothesisContribution = coupling * mask * waveFactor;
+  const density = Math.max(0, Math.min(1, hypothesisContribution));
 
   return {
     density,
@@ -577,6 +587,7 @@ export function computeWaveCloudDensity(
     kPerpX,
     kPerpY,
     wavePhase,
+    hypothesisContribution,
   };
 }
 
@@ -589,9 +600,11 @@ export function computeNaturalWeatherCloudDensity(
   x: number,
   y: number,
   weatherData?: any,
-  time: number = 0
+  time: number = 0,
+  aerosolBaselineMultiplier: number = 1
 ): number {
-  if (!weatherData) return 0.35;
+  const aerosolFactor = Math.max(0.7, Math.min(1, aerosolBaselineMultiplier));
+  if (!weatherData) return 0.35 * aerosolFactor;
 
   const cloudCover = Math.max(0, Math.min(100, weatherData.cloudCoverPercent ?? 50)) / 100;
   const humidity = Math.max(10, Math.min(100, weatherData.relativeHumidity ?? 60)) / 100;
@@ -613,7 +626,7 @@ export function computeNaturalWeatherCloudDensity(
   const pressureFactor = Math.max(0.7, Math.min(1.4, 1.0 + (1020 - pressure) / 40));
 
   const naturalDensity = Math.max(0, Math.min(1, rawHarmonic * cloudCover * (0.35 + humidity * 0.65) * pressureFactor));
-  return naturalDensity;
+  return naturalDensity * aerosolFactor;
 }
 
 /**

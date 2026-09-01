@@ -2,6 +2,7 @@ import React, { useRef, useEffect, useState } from 'react';
 import * as THREE from 'three';
 import { AtmosphericCloudConfig, EarthDipoleConfig, ExternalMagneticSource, SolarWindConfig } from '../types';
 import { RotateCw, Eye, Sparkles, Orbit, Compass, Sliders, Shield } from 'lucide-react';
+import { computeShueMagnetopauseRadius } from '../physics/physicsCalibration';
 
 interface Magnetosphere3DViewProps {
   earthConfig: EarthDipoleConfig;
@@ -325,6 +326,9 @@ export const Magnetosphere3DView: React.FC<Magnetosphere3DViewProps> = ({
     // Generate 3D Dipole Field Loops
     const rings = 16;
     const lValues = [2.2, 3.2, 4.5, 6.0]; // L-Shell parameters
+    const magnetopause = computeShueMagnetopauseRadius(0, solarWind.pressure, solarWind.imfBz);
+    const daysideScale = Math.max(0.55, Math.min(1.35, magnetopause.subsolarEarthRadii / 10.22));
+    const tailScale = Math.max(0.8, Math.min(1.5, magnetopause.flaring / 0.58));
 
     for (const L of lValues) {
       for (let rIdx = 0; rIdx < rings; rIdx++) {
@@ -342,10 +346,10 @@ export const Magnetosphere3DView: React.FC<Magnetosphere3DViewProps> = ({
           if (solarWind.enabled) {
             if (x < 0) {
               // Compressed dayside
-              x *= 1 / (1 + 0.35 * solarWind.pressure);
+              x *= daysideScale;
             } else {
               // Stretched magnetotail
-              x *= 1 + 0.25 * solarWind.pressure;
+              x *= tailScale;
             }
           }
 

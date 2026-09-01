@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { AIAnalysisMessage, EarthDipoleConfig, ExternalMagneticSource, SolarWindConfig } from '../types';
+import { requestGemini } from '../services/geminiApiClient';
 import { LatexRenderer } from './MathFormulaCard';
 import {
   Bot,
@@ -61,7 +62,7 @@ export const GeminiExpertAssistant: React.FC<GeminiExpertAssistantProps> = ({
     },
     {
       label: '☁️ 가상 지진운 대기 편광 정렬 모델 유도',
-      prompt: '왜곡된 자기력선을 따라 대기 중 하전 에어로졸/수적 입자가 정렬되는 토크 방정식 $\\tau = -\\kappa \\sin(2(\\phi - \\theta_B))$과 네마틱 질서도 $S$의 물리학적 의미를 설명해줘.',
+      prompt: '현재 입자 모델의 Stokes 항력, 바람 이류, 난류 확산, $\\nabla B^2$ magnetophoresis와 가설 결합항 $A_h$를 구분하고, 각 항의 단위와 대조군을 설명해줘.',
     },
     {
       label: '🌊 양떼구름(Altocumulus) 국소 정렬 파동 모델',
@@ -69,7 +70,7 @@ export const GeminiExpertAssistant: React.FC<GeminiExpertAssistantProps> = ({
     },
     {
       label: '🌋 지각 응력 텐서 및 임계 지진 유발 해석',
-      prompt: '자기 에너지 밀도 구배 $\\nabla |\\mathbf{B}|^2$와 압전/자기변형 결합 계수 $\\alpha$를 통한 단층대 응력 누적 및 지진 파열(Rupture) 과정을 단계별로 수식과 함께 설명해줘.',
+      prompt: '판구조 하중 누적, 가역적 달 조석 섭동, 가설적 자기 응력, 원형 균열 지진모멘트와 $M_w$ 환산을 구분하고 어떤 값이 합성 가정인지 설명해줘.',
     },
     {
       label: '☀️ 태양풍(IMF) 남향 역전(Bz < 0) 충격 해석',
@@ -102,47 +103,23 @@ export const GeminiExpertAssistant: React.FC<GeminiExpertAssistantProps> = ({
 
     try {
       const activeSources = sources.filter((s) => s.active);
-      const res = await fetch('/api/gemini/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: query,
-          modelPreference: enableThinking ? 'pro' : modelPreference,
-          enableThinking,
-          simulationState: {
-            earthMoment: earthConfig.moment,
-            earthTilt: earthConfig.tiltAngle,
-            sources: activeSources,
-            imfBx: solarWind.imfBx,
-            imfBz: solarWind.imfBz,
-            solarWindPressure: solarWind.pressure,
-            maxStress,
-            maxStressNodeIndex,
-            alignmentOrder,
-          },
-        }),
+      const data = await requestGemini<{ text: string; model: string }>('/api/gemini/analyze', {
+        prompt: query,
+        modelPreference,
+        enableThinking,
+        simulationState: {
+          earthMoment: earthConfig.moment,
+          earthTilt: earthConfig.tiltAngle,
+          sources: activeSources,
+          imfBx: solarWind.imfBx,
+          imfBz: solarWind.imfBz,
+          solarWindPressure: solarWind.pressure,
+          maxStress,
+          maxStressNodeIndex,
+          alignmentOrder,
+        },
       });
-
-      let data: any = {};
-      try {
-        data = await res.json();
-      } catch {
-        if (!res.ok) {
-          throw new Error('정적 웹 호스팅(GitHub Pages) 환경입니다. 대화형 AI 분석 기능은 Node.js 서버 환경에서 실행하거나 개발 환경에서 지원됩니다. (2D/3D 물리 계산 및 파동운 시뮬레이션은 100% 브라우저에서 정상 작동합니다.)');
-        }
-      }
-
-      if (data.error) {
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `error-${Date.now()}`,
-            role: 'assistant',
-            content: `⚠️ 오류: ${data.error}`,
-            timestamp: Date.now(),
-          },
-        ]);
-      } else if (data.text) {
+      if (data.text) {
         setMessages((prev) => [
           ...prev,
           {

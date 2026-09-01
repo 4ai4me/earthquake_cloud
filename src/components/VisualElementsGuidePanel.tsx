@@ -85,7 +85,7 @@ export const VISUAL_ELEMENTS_DATA: VisualElementGuideItem[] = [
   {
     id: 'externalSources',
     category: 'field',
-    name: '외부 자기원 (단극자/다극자/혜성 소스)',
+    name: '외부 자기원 (합성 극 프록시/쌍극자/혜성)',
     badge: 'External Magnetic Sources & Comet',
     color: '#a855f7',
     formulaSymbol: '\\mathbf{B}_{\\text{ext}}, q_m, \\mathbf{B}_{\\text{comet}}',
@@ -110,7 +110,7 @@ export const VISUAL_ELEMENTS_DATA: VisualElementGuideItem[] = [
     name: '달 공전 궤도 및 위상 (Orbit & Phase)',
     badge: 'Lunar Orbit Ring (R_EM)',
     color: '#94a3b8',
-    formulaSymbol: 'R_{\\text{EM}} \\approx 384,400\\text{km}, T = 27.3\\text{d}',
+    formulaSymbol: 'd_{EM} \\approx 60.3R_E \\approx 384,400\\text{km}, T = 27.3\\text{d}',
     summary: '달의 공전 궤도 원 및 삭-상현-망-하현 위상각',
     physicsDescription:
       '지구 중심을 기준으로 한 달의 공전 궤도 경로(원형 궤도선)입니다. 지구 자기권 꼬리(Magnetotail) 통과 여부 및 태양과의 상대적 각도(위상각 θ_M)에 따른 시뮬레이션 환경을 시각화합니다.',

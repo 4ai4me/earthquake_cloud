@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useMemo } from 'react';
 import {
   AtmosphericCloudConfig,
   EarthDipoleConfig,
@@ -15,6 +15,7 @@ import {
   applyCloudGamma,
   getInspectionCloudColor,
 } from '../physics/magneticEngine';
+import { computeAerosolCloudBaselineMultiplier } from '../physics/cernCloudAerosolEngine';
 import {
   Columns,
   Eye,
@@ -45,6 +46,10 @@ export function CloudInspectionSplitView({
   const canvas2Ref = useRef<HTMLCanvasElement | null>(null);
   const canvas3Ref = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const aerosolBaselineMultiplier = useMemo(
+    () => computeAerosolCloudBaselineMultiplier(cloudConfig.aerosolExperiment),
+    [cloudConfig.aerosolExperiment]
+  );
 
   // Wheel isolation
   useEffect(() => {
@@ -130,7 +135,7 @@ export function CloudInspectionSplitView({
           );
 
           // [View 1] Pure Cloud Pattern with Gamma (Natural Weather Background + Stimulated Wave Cloud)
-          const naturalDensity = computeNaturalWeatherCloudDensity(wx, wy, cloudConfig.weatherData, animPhase);
+          const naturalDensity = computeNaturalWeatherCloudDensity(wx, wy, cloudConfig.weatherData, animPhase, aerosolBaselineMultiplier);
           const totalCloudDensity = Math.max(waveData.density, naturalDensity * 0.65);
 
           if (totalCloudDensity > 0.01) {

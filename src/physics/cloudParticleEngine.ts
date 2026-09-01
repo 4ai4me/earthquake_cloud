@@ -1,5 +1,6 @@
 import { AtmosphericCloudConfig, EarthDipoleConfig, ExternalMagneticSource, SolarWindConfig } from '../types';
 import { computeTotalMagneticField, computeFieldGradient, computeWaveCloudDensity } from './magneticEngine';
+import { computeAerosolCloudBaselineMultiplier } from './cernCloudAerosolEngine';
 
 export interface CloudParticle {
   id: number;
@@ -10,6 +11,7 @@ export interface CloudParticle {
   angle: number; // Orientation of droplet/aerosol dipole
   targetAngle: number;
   charge: number; // -1 to +1
+  susceptibilitySign: -1 | 1; // diamagnetic (-) or paramagnetic/mineral-bearing (+) proxy
   size: number;
   opacity: number;
   life: number;
@@ -41,7 +43,7 @@ export class CloudParticleSystem {
   createRandomParticle(initial: boolean = false): CloudParticle {
     // Spawn in atmosphere zone around Earth or upstream
     const angle = Math.random() * Math.PI * 2;
-    const r = 0.85 + Math.random() * 3.5; // atmosphere & magnetosphere zone
+    const r = 0.85 + Math.random() * 3.5; // schematic display shell; not a true atmospheric altitude scale
     const x = Math.cos(angle) * r;
     const y = Math.sin(angle) * r;
 
@@ -54,6 +56,7 @@ export class CloudParticleSystem {
       angle: Math.random() * Math.PI * 2,
       targetAngle: 0,
       charge: Math.random() > 0.5 ? 1 : -1,
+      susceptibilitySign: Math.random() < 0.85 ? -1 : 1,
       size: 1.5 + Math.random() * 2.5,
       opacity: initial ? 0.3 + Math.random() * 0.5 : 0.05,
       life: initial ? Math.floor(Math.random() * 300) : 0,
@@ -89,10 +92,12 @@ export class CloudParticleSystem {
     let hotspotCount = 0;
     let maxI = 0;
     const bounds = { minX: -5.5, maxX: 5.5, minY: -3.5, maxY: 3.5 };
+    const aerosolBaselineMultiplier = computeAerosolCloudBaselineMultiplier(config.aerosolExperiment);
 
     for (let i = 0; i < this.particles.length; i++) {
       const p = this.particles[i];
-      p.life++;
+      const stableDt = Math.max(0, Math.min(0.05, dt));
+      p.life += stableDt * 60;
 
       // Fade in and out
       if (p.life < 30) {
@@ -126,66 +131,74 @@ export class CloudParticleSystem {
         const fieldAngle = Math.atan2(field.by, field.bx);
         p.targetAngle = fieldAngle;
 
-        // Polarized alignment torque: tau = -k * sin(2*(angle - fieldAngle))
+        // Hypothesis orientation response. Ordinary spherical water droplets do
+        // not acquire this strong torque at geomagnetic field strengths.
         const angleDiff = p.targetAngle - p.angle;
         const normalizedDiff = Math.atan2(Math.sin(angleDiff), Math.cos(angleDiff));
-
-        // Alignment relaxation (boosted inside hotspot mask)
-        const suscep = config.polarizationSusceptibility * (1 + (waveData.mask || 0) * 0.8);
-        p.angle += normalizedDiff * suscep * 0.15;
+        const hypothesisCoupling = config.hypothesisEnabled === false ? 0 : Math.max(0, Math.min(1, config.hypothesisCoupling ?? 0.6));
+        const suscep = config.polarizationSusceptibility * hypothesisCoupling * (1 + (waveData.mask || 0) * 0.5);
+        const orientationRelaxation = 1 - Math.exp(-Math.max(0, suscep) * stableDt);
+        p.angle += normalizedDiff * orientationRelaxation;
 
         // Nematic order parameter component: cos^2(delta theta)
         const cosDelta = Math.cos(p.angle - fieldAngle);
         p.alignment = cosDelta * cosDelta; // 0 to 1
         totalAlignmentScore += 2 * p.alignment - 1;
 
-        // Flow along field line (drift velocity)
-        const driftSpeed = 0.08 * (1.0 / (1.0 + bMag * 0.2));
         const dirX = field.bx / bMag;
         const dirY = field.by / bMag;
+        const nPerpX = -dirY;
+        const nPerpY = dirX;
 
-        // Lorentz / drift force
-        const forceX = dirX * driftSpeed * p.charge;
-        const forceY = dirY * driftSpeed * p.charge;
+        // Overdamped Stokes response: the carrier-air velocity is the baseline.
+        // 300 simulated seconds per display second keeps meteorological motion visible.
+        const windScale = 300 / 100_000;
+        const windVx = (config.weatherData?.windU ?? 0) * windScale;
+        const windVy = (config.weatherData?.windV ?? 0) * windScale;
 
-        p.vx = p.vx * (1 - config.viscosity) + forceX * config.viscosity;
-        p.vy = p.vy * (1 - config.viscosity) + forceY * config.viscosity;
-
-        // Apply meteorological wind advection drift (NOAA GFS / ECMWF / DWD wind vector u, v)
-        if (config.weatherData) {
-          const windVx = (config.weatherData.windU || 0) * 0.0003;
-          const windVy = (config.weatherData.windV || 0) * 0.0003;
-          p.vx += windVx;
-          p.vy += windVy;
-        }
-
-        // Wave cloud orthogonal grouping (pushing towards wave crests)
-        if (config.showWaveClouds && waveData.mask > 0.1) {
-          const waveForce = Math.sin(waveData.wavePhase) * 0.008 * waveData.mask;
-          const nPerpX = -dirY;
-          const nPerpY = dirX;
-          p.vx += nPerpX * waveForce;
-          p.vy += nPerpY * waveForce;
-        }
-
-        // Gradient drift (cloud condensation towards high/low gradient boundaries)
+        // Weak magnetophoretic proxy follows sign(Delta chi)*grad(B^2), never B itself.
         const grad = computeFieldGradient(p.x, p.y, earthConfig, sources, solarWind);
-        if (grad.gradMag > 0.01) {
-          p.vx += (grad.gradX / grad.gradMag) * 0.005 * config.polarizationSusceptibility;
-          p.vy += (grad.gradY / grad.gradMag) * 0.005 * config.polarizationSusceptibility;
-        }
+        const gradientDirectionX = grad.gradMag > 1e-9 ? grad.gradX / grad.gradMag : 0;
+        const gradientDirectionY = grad.gradMag > 1e-9 ? grad.gradY / grad.gradMag : 0;
+        const magneticGradientScore = Math.tanh(2 * bMag * grad.gradMag);
+        const magnetophoreticSpeed = p.susceptibilitySign * magneticGradientScore * 0.00005;
 
-        // Condensation factor (high when aligned and field intensity is prominent, boosted by wave cloud)
-        const baseCond = Math.min(1.0, p.alignment * (bMag / (bMag + config.condensationThreshold)));
-        p.condensationFactor = Math.min(1.0, baseCond + (config.showWaveClouds ? waveData.density * 0.6 : 0));
+        // Explicit hypothesis drift toward/away from proposed wave crests. This
+        // replaces the incorrect in-plane "Lorentz force along B" implementation.
+        const chargedFraction = Math.max(0, Math.min(1, config.chargeRatio));
+        const hypothesisSpeed = config.showWaveClouds
+          ? hypothesisCoupling * chargedFraction * Math.sin(waveData.wavePhase) * waveData.mask * 0.025
+          : 0;
+        const targetVx = windVx + gradientDirectionX * magnetophoreticSpeed + nPerpX * hypothesisSpeed;
+        const targetVy = windVy + gradientDirectionY * magnetophoreticSpeed + nPerpY * hypothesisSpeed;
+        const dragTime = Math.max(0.05, 1.5 - Math.min(1, config.viscosity) * 1.4);
+        const dragRelaxation = 1 - Math.exp(-stableDt / dragTime);
+        p.vx += (targetVx - p.vx) * dragRelaxation;
+        p.vy += (targetVy - p.vy) * dragRelaxation;
+
+        // Turbulent diffusion is represented by a 2-D Langevin increment.
+        const diffusivity = Math.max(0, config.turbulentDiffusivity ?? 0.00002);
+        const noiseScale = Math.sqrt(2 * diffusivity * stableDt);
+        const randomAngle = Math.random() * Math.PI * 2;
+        p.x += Math.cos(randomAngle) * noiseScale;
+        p.y += Math.sin(randomAngle) * noiseScale;
+
+        // Meteorology controls the baseline condensation proxy. The hypothesis
+        // contributes only a bounded delta that is zero in control mode.
+        const humidity = Math.max(0, Math.min(1, (config.weatherData?.relativeHumidity ?? 60) / 100));
+        const cloudCover = Math.max(0, Math.min(1, (config.weatherData?.cloudCoverPercent ?? 50) / 100));
+        const humidityActivation = 1 / (1 + Math.exp(-16 * (humidity - 0.75)));
+        const meteorologicalCondensation = (0.65 * humidityActivation + 0.35 * cloudCover) * aerosolBaselineMultiplier;
+        const hypothesisDelta = hypothesisCoupling * chargedFraction * waveData.density * 0.35;
+        p.condensationFactor = Math.max(0, Math.min(1, meteorologicalCondensation + hypothesisDelta));
       } else {
         p.vx *= 0.95;
         p.vy *= 0.95;
       }
 
       // Update position
-      p.x += p.vx;
-      p.y += p.vy;
+      p.x += p.vx * stableDt;
+      p.y += p.vy * stableDt;
 
       // Prevent sinking deep inside Earth core
       const distToEarth = Math.hypot(p.x - earthConfig.x, p.y - earthConfig.y);

@@ -403,6 +403,7 @@ export default function App() {
           <div className="w-full h-[540px] md:h-[620px] lg:h-[calc(100vh-5.5rem)] lg:min-h-[32rem] lg:max-h-[620px] rounded-lg border border-[#1e1e24] bg-[#0c0c10] overflow-hidden shadow-2xl shadow-black/80">
             {viewMode === '2D' && (
               <SimulationCanvas2D
+                key={`${cloudConfig.perspectiveMode ?? 'space_global'}:${cloudConfig.inspectionMode === 'split_3view' ? 'split' : 'canvas'}`}
                 earthConfig={earthConfig}
                 setEarthConfig={setEarthConfig}
                 sources={sources}
@@ -442,6 +443,7 @@ export default function App() {
             {viewMode === 'split' && (
               <div className="grid grid-cols-2 gap-2 h-full bg-[#0a0a0c]">
                 <SimulationCanvas2D
+                  key={`split:${cloudConfig.perspectiveMode ?? 'space_global'}:${cloudConfig.inspectionMode === 'split_3view' ? 'split' : 'canvas'}`}
                   earthConfig={earthConfig}
                   setEarthConfig={setEarthConfig}
                   sources={sources}

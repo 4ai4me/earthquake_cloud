@@ -229,6 +229,87 @@ export function computeTotalMagneticField(
   return { bx, by, magnitude };
 }
 
+export interface MagnetosphereDistortion3D {
+  dx: number;
+  dy: number;
+  dz: number;
+  influence: number;
+}
+
+/**
+ * Bounded visual displacement for the 3D magnetosphere.
+ *
+ * This is a hypothesis visualisation coupling, not a validated prediction of
+ * magnetohydrodynamic plasma motion. It projects the configured external source
+ * types into 3D while using softening and a hard displacement cap so singular
+ * source fields cannot tear or invert the rendered flux tubes.
+ */
+export function computeExternalMagnetosphereDistortion3D(
+  x: number,
+  y: number,
+  z: number,
+  sources: ExternalMagneticSource[],
+  maxDisplacement: number = 1.8
+): MagnetosphereDistortion3D {
+  let dx = 0;
+  let dy = 0;
+  let dz = 0;
+  let influence = 0;
+
+  for (const source of sources) {
+    if (!source.active) continue;
+
+    const rx = x - source.x;
+    const ry = y - source.y;
+    const rz = z - (source.z ?? 0);
+    const softenedR2 = rx * rx + ry * ry + rz * rz + 0.45 * 0.45;
+    const r = Math.sqrt(softenedR2);
+    const sourceScale = Math.tanh(Math.max(0, Math.abs(source.strength)) / 3);
+    const falloff = sourceScale / (1 + 0.28 * softenedR2);
+
+    if (source.type === 'monopole_n' || source.type === 'monopole_s') {
+      const polarity = source.type === 'monopole_n' ? 1 : -1;
+      const gain = polarity * falloff * 1.35;
+      dx += (rx / r) * gain;
+      dy += (ry / r) * gain;
+      dz += (rz / r) * gain;
+      influence += Math.abs(gain);
+    } else if (source.type === 'dipole') {
+      const angle = ((source.angle ?? 0) * Math.PI) / 180;
+      const mx = Math.cos(angle);
+      const my = Math.sin(angle);
+      const dot = (mx * rx + my * ry) / r;
+      const gain = falloff * 1.15;
+      dx += (3 * dot * (rx / r) - mx) * gain;
+      dy += (3 * dot * (ry / r) - my) * gain;
+      dz += 3 * dot * (rz / r) * gain;
+      influence += Math.abs(gain);
+    } else if (source.type === 'comet') {
+      const tailLength = Math.max(1, source.cometTailLength ?? 3);
+      const tailEnvelope = rx > 0
+        ? Math.exp(-rx / tailLength) * Math.exp(-(ry * ry + rz * rz) / 2.2)
+        : 0;
+      const cavityGain = falloff * 0.9;
+      dx -= (rx / r) * cavityGain;
+      dy -= (ry / r) * cavityGain;
+      dz -= (rz / r) * cavityGain;
+      dx += tailEnvelope * sourceScale * 0.85;
+      dy += Math.sign(ry || 1) * tailEnvelope * sourceScale * 0.18;
+      influence += Math.abs(cavityGain) + tailEnvelope * sourceScale;
+    }
+  }
+
+  const length = Math.hypot(dx, dy, dz);
+  if (length > maxDisplacement && length > 0) {
+    const scale = maxDisplacement / length;
+    dx *= scale;
+    dy *= scale;
+    dz *= scale;
+  }
+
+  return { dx, dy, dz, influence: Math.min(influence, 4) };
+}
+
 /**
  * Computes Spatial Gradient of Field Magnitude: grad |B|
  */

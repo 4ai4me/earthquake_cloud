@@ -519,18 +519,39 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
       // 4. Render Magnetic Streamlines (RK4)
       if (currentLayers.streamlines && (renderMode === 'streamlines' || renderMode === 'composite')) {
         const seedAngles = streamlineDensity || 24;
-        const startDistances = [earthConfig.radius * 1.05, earthConfig.radius * 1.4, earthConfig.radius * 2.2];
+        const visibleWidth = Math.abs(maxWorld.wx - minWorld.wx);
+        const visibleHeight = Math.abs(maxWorld.wy - minWorld.wy);
+        const visibleRadius = Math.max(earthConfig.radius * 2.5, Math.min(10, Math.hypot(visibleWidth, visibleHeight) * 0.42));
+        const startDistances = Array.from(new Set([
+          earthConfig.radius * 1.05,
+          earthConfig.radius * 1.45,
+          Math.min(earthConfig.radius * 2.4, visibleRadius * 0.38),
+          visibleRadius * 0.58,
+          visibleRadius * 0.82,
+        ].map((distance) => Number(distance.toFixed(3)))));
+        const traceBounds = {
+          minX: minWorld.wx - visibleWidth * 0.08,
+          maxX: maxWorld.wx + visibleWidth * 0.08,
+          minY: minWorld.wy - visibleHeight * 0.08,
+          maxY: maxWorld.wy + visibleHeight * 0.08,
+        };
+        // Keep integration resolution roughly constant in screen pixels while
+        // allowing zoomed-out views to reach the full visible magnetosphere.
+        const traceStep = Math.max(0.055, Math.min(0.14, 4.5 / zoom));
+        const traceMaxSteps = Math.max(160, Math.min(300, Math.ceil((Math.hypot(visibleWidth, visibleHeight) / traceStep) * 1.15)));
 
         ctx.save();
-        for (const dist of startDistances) {
-          for (let i = 0; i < seedAngles; i++) {
-            const angle = (i / seedAngles) * Math.PI * 2 + (earthConfig.tiltAngle * Math.PI) / 180;
+        for (let shellIndex = 0; shellIndex < startDistances.length; shellIndex++) {
+          const dist = startDistances[shellIndex];
+          const shellSeedCount = shellIndex < 3 ? seedAngles : Math.max(10, Math.round(seedAngles * 0.6));
+          for (let i = 0; i < shellSeedCount; i++) {
+            const angle = (i / shellSeedCount) * Math.PI * 2 + (earthConfig.tiltAngle * Math.PI) / 180;
             const sx = earthConfig.x + Math.cos(angle) * dist;
             const sy = earthConfig.y + Math.sin(angle) * dist;
 
             // Trace forward and backward
-            const lineForward = traceStreamlineRK4(sx, sy, earthConfig, sources, solarWind, 1, 140, 0.06);
-            const lineBackward = traceStreamlineRK4(sx, sy, earthConfig, sources, solarWind, -1, 140, 0.06);
+            const lineForward = traceStreamlineRK4(sx, sy, earthConfig, sources, solarWind, 1, traceMaxSteps, traceStep, traceBounds, moonConfig);
+            const lineBackward = traceStreamlineRK4(sx, sy, earthConfig, sources, solarWind, -1, traceMaxSteps, traceStep, traceBounds, moonConfig);
             const fullLine = [...lineBackward.reverse(), ...lineForward];
 
             if (fullLine.length > 2) {
@@ -575,7 +596,7 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
             const extAngle = (k / extSeeds) * Math.PI * 2;
             const esx = s.x + Math.cos(extAngle) * 0.25;
             const esy = s.y + Math.sin(extAngle) * 0.25;
-            const extLine = traceStreamlineRK4(esx, esy, earthConfig, sources, solarWind, s.type === 'monopole_s' ? -1 : 1, 100, 0.06);
+            const extLine = traceStreamlineRK4(esx, esy, earthConfig, sources, solarWind, s.type === 'monopole_s' ? -1 : 1, traceMaxSteps, traceStep, traceBounds, moonConfig);
 
             if (extLine.length > 2) {
               ctx.beginPath();
@@ -1377,6 +1398,7 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
     earthConfig,
     sources,
     solarWind,
+    moonConfig,
     cloudConfig,
     stressManager,
     particleSystem,
@@ -1392,6 +1414,7 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
     zoom,
     onEarthquakeTriggered,
     probeInfo,
+    currentLayers,
   ]);
 
   // Handle Canvas Resize
@@ -1406,11 +1429,14 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
       }
     };
 
-    handleResize();
+    const resizeFrame = requestAnimationFrame(handleResize);
     const observer = new ResizeObserver(handleResize);
     if (containerRef.current) observer.observe(containerRef.current);
-    return () => observer.disconnect();
-  }, []);
+    return () => {
+      cancelAnimationFrame(resizeFrame);
+      observer.disconnect();
+    };
+  }, [cloudConfig.perspectiveMode, cloudConfig.inspectionMode]);
 
   // Mouse Interaction Handlers
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {

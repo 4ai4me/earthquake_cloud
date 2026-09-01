@@ -9,6 +9,7 @@ import {
 } from '../src/types';
 import {
   calculateEarthDipoleField,
+  computeExternalMagnetosphereDistortion3D,
   computeInterferenceIntensity,
   computeWaveCloudDensity,
 } from '../src/physics/magneticEngine';
@@ -65,6 +66,24 @@ test('dimensionless interference stays bounded and null control is exactly zero'
   );
   assert.equal(control.density, 0);
   assert.equal(control.hypothesisContribution, 0);
+});
+
+test('3D external-source deformation is inactive at control and bounded under strong forcing', () => {
+  assert.deepEqual(computeExternalMagnetosphereDistortion3D(2, 0, 0, []), {
+    dx: 0,
+    dy: 0,
+    dz: 0,
+    influence: 0,
+  });
+
+  const north = [{ id: 'n', name: 'north', type: 'monopole_n' as const, x: 0, y: 0, strength: 100, active: true }];
+  const south = [{ ...north[0], id: 's', name: 'south', type: 'monopole_s' as const }];
+  const northResult = computeExternalMagnetosphereDistortion3D(2, 0, 0, north);
+  const southResult = computeExternalMagnetosphereDistortion3D(2, 0, 0, south);
+  assert.ok(northResult.dx > 0);
+  assert.ok(southResult.dx < 0);
+  assert.ok(Math.hypot(northResult.dx, northResult.dy, northResult.dz) <= 1.800001);
+  assert.ok(Math.hypot(southResult.dx, southResult.dy, southResult.dz) <= 1.800001);
 });
 
 test('tidal and magnetic perturbations do not accumulate as tectonic load', () => {

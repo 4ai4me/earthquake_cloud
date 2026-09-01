@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { AtmosphericCloudConfig, EarthDipoleConfig, ExternalMagneticSource, SolarWindConfig } from '../types';
 import { RotateCw, Eye, Sparkles, Orbit, Compass, Sliders, Shield } from 'lucide-react';
 import { computeShueMagnetopauseRadius } from '../physics/physicsCalibration';
+import { computeExternalMagnetosphereDistortion3D } from '../physics/magneticEngine';
 
 interface Magnetosphere3DViewProps {
   earthConfig: EarthDipoleConfig;
@@ -31,6 +32,8 @@ export const Magnetosphere3DView: React.FC<Magnetosphere3DViewProps> = ({
   const particlesGroupRef = useRef<THREE.Points | null>(null);
   const bowShockMeshRef = useRef<THREE.Mesh | null>(null);
   const earthMeshRef = useRef<THREE.Group | null>(null);
+  const activeSources = sources.filter((source) => source.active);
+  const activeSourceStrength = activeSources.reduce((sum, source) => sum + Math.abs(source.strength), 0);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -316,12 +319,53 @@ export const Magnetosphere3DView: React.FC<Magnetosphere3DViewProps> = ({
     const fieldLinesGroup = fieldLinesGroupRef.current;
     if (!fieldLinesGroup) return;
 
-    // Clear old lines
+    // Clear old lines and dispose GPU resources before rebuilding them.
     while (fieldLinesGroup.children.length > 0) {
-      fieldLinesGroup.remove(fieldLinesGroup.children[0]);
+      const child = fieldLinesGroup.children[0];
+      child.traverse((object) => {
+        const mesh = object as THREE.Mesh;
+        mesh.geometry?.dispose();
+        if (Array.isArray(mesh.material)) {
+          mesh.material.forEach((material) => material.dispose());
+        } else {
+          mesh.material?.dispose();
+        }
+      });
+      fieldLinesGroup.remove(child);
     }
 
     if (!showFluxTubes) return;
+
+    // Source markers make the origin of each visible deformation explicit.
+    for (const source of sources) {
+      if (!source.active) continue;
+      const sourceColor = source.type === 'monopole_n'
+        ? 0xef4444
+        : source.type === 'monopole_s'
+          ? 0x3b82f6
+          : source.type === 'comet'
+            ? 0xf59e0b
+            : 0xa855f7;
+      const markerGroup = new THREE.Group();
+      markerGroup.position.set(source.x - earthConfig.x, source.y - earthConfig.y, source.z ?? 0);
+
+      const marker = new THREE.Mesh(
+        new THREE.SphereGeometry(0.16, 14, 14),
+        new THREE.MeshBasicMaterial({ color: sourceColor })
+      );
+      markerGroup.add(marker);
+      const influenceShell = new THREE.Mesh(
+        new THREE.SphereGeometry(0.45 + Math.min(0.7, Math.abs(source.strength) * 0.12), 14, 10),
+        new THREE.MeshBasicMaterial({
+          color: sourceColor,
+          transparent: true,
+          opacity: 0.12,
+          wireframe: true,
+        })
+      );
+      markerGroup.add(influenceShell);
+      fieldLinesGroup.add(markerGroup);
+    }
 
     // Generate 3D Dipole Field Loops
     const rings = 16;
@@ -329,6 +373,9 @@ export const Magnetosphere3DView: React.FC<Magnetosphere3DViewProps> = ({
     const magnetopause = computeShueMagnetopauseRadius(0, solarWind.pressure, solarWind.imfBz);
     const daysideScale = Math.max(0.55, Math.min(1.35, magnetopause.subsolarEarthRadii / 10.22));
     const tailScale = Math.max(0.8, Math.min(1.5, magnetopause.flaring / 0.58));
+    const tilt = (earthConfig.tiltAngle * Math.PI) / 180;
+    const cosTilt = Math.cos(tilt);
+    const sinTilt = Math.sin(tilt);
 
     for (const L of lValues) {
       for (let rIdx = 0; rIdx < rings; rIdx++) {
@@ -352,6 +399,20 @@ export const Magnetosphere3DView: React.FC<Magnetosphere3DViewProps> = ({
               x *= tailScale;
             }
           }
+
+          // Rotate the analytical loop with the configured dipole axis before
+          // coupling the bounded external-source deformation.
+          const tiltedX = x * cosTilt - y * sinTilt;
+          const tiltedY = x * sinTilt + y * cosTilt;
+          const distortion = computeExternalMagnetosphereDistortion3D(
+            tiltedX + earthConfig.x,
+            tiltedY + earthConfig.y,
+            z,
+            sources
+          );
+          x = tiltedX + distortion.dx;
+          y = tiltedY + distortion.dy;
+          z += distortion.dz;
 
           curvePoints.push(new THREE.Vector3(x, y, z));
         }
@@ -439,6 +500,15 @@ export const Magnetosphere3DView: React.FC<Magnetosphere3DViewProps> = ({
 
       {/* Mount Container */}
       <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing flex-1" />
+
+      <div
+        data-testid="external-distortion-status"
+        className="absolute top-14 right-2.5 z-20 px-2 py-1 bg-[#0f0f13]/90 rounded border border-[#2c2c3e] text-[10px] font-mono text-slate-300 pointer-events-none"
+        title="가설 시각화용 외부 자기원 결합 강도"
+      >
+        외부 변형원 <span className={activeSources.length > 0 ? 'text-amber-300 font-bold' : 'text-slate-500'}>{activeSources.length}</span>
+        {' · '}Σ|S| <span className="text-cyan-300">{activeSourceStrength.toFixed(1)}</span>
+      </div>
 
       {/* Floating 3D Navigation Guide */}
       <div className="absolute bottom-2.5 left-2.5 z-20 flex items-center gap-2 p-1.5 px-2 bg-[#0f0f13] rounded border border-[#1e1e24] text-[10px] font-mono text-slate-300 shadow-xl pointer-events-none">

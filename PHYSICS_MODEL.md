@@ -7,12 +7,27 @@ This simulator contains two deliberately separated layers:
 
 The program is a sensitivity experiment. It is not a validated earthquake predictor.
 
-## Coordinates and units
+## Coordinates and compatibility (schemaVersion 2)
 
-- The 2-D canvas uses normalized display coordinates. `B* = 1` is calibrated to an equatorial surface reference field of 31,200 nT only when a physical conversion is requested.
-- External pole and comet strengths remain dimensionless scenario inputs. A “monopole” is a synthetic boundary-condition proxy, not a claim that magnetic monopoles have been observed.
-- Solar-wind `imfBx` and `imfBz` are nT. `fieldVisualizationGain` is an explicit display-only amplification and must not be interpreted as a measured field.
-- The Moon's 3.5 world-unit display orbit is independent of its physical mean center distance, 60.3 Earth radii.
+Authoritative field: src/physics/fieldModel.ts. R_E=6,371 km, B*=B/(31,200 nT); 2D samples the 3D field at z=0. Dipole fieldNt is the ideal equatorial strength at distance 1 R_E from the source. Legacy strength=1 retains this reference. IMF nT is not amplified; fieldVisualizationGain is compatibility-only.
+
+String input preserves large exponents without a fabricated nT ceiling. Above 1e100 nT, ordinary cloud/fault/Python quantitative solvers stop with a warning while directional geometry continues. Infinity is a directional asymptote, not a physical infinite-energy solution; opposing infinite contributions without relative growth rates are indeterminate. Exponents must be exactly representable integers; non-field controls retain finite safety ranges.
+
+Moon geometry uses the physical distance 60.3 R_E. Baseline global lunar dipole is zero; an optional whole-Moon dipole is explicitly hypothetical. Local anomalies, wake plasma and ocean/ionospheric tidal currents are not solved. Atmospheric/fault magnetic diagnostics exclude that optional lunar dipole; magnetic geometry includes it.
+
+Cloud particles/bands occupy a prescribed 12±1.5 km shell, not predicted condensation height. Altitude display gain does not modify physics. 3D shares the z=0 particle cross-section. Ground-sky sampling intersects the physical shell; diagnostic-plane maps show functions, not cloud placement.
+
+References: [NASA Moon](https://science.nasa.gov/moon/solar-wind/), [NWS clouds](https://www.weather.gov/lmk/cloud_classification).
+
+## Display, kinematics and core response
+
+Line opacity has a fixed 0.01–31,200 nT log scale; pulses are annotations, not energy transport. The weak contour is an ideal Earth-component iso-|B| surface (10 nT default), not a zero edge. RK4 ends at numerical display bounds.
+
+3D field lines use actual vector superposition, not bounded visual displacement. This does not solve plasma currents, induction, shielding, reconnection or full MHD. Source rotation/orbit are independently prescribed kinematics, not torque-driven motion.
+
+Core baseline 15 km/year is a configurable representative scale, not uniform measured flow. The inset is accelerated for explanation. Optional Δu=κT²P_extτ/(ρL), P_ext=B_ext²/(2μ₀), assumes ρ=11,000 kg/m³, L=2,260 km, transmission T, signed coupling κ and response time τ. This is **반드시 가설**. OFF/T=0/κ=0 gives zero response; there is no established universal nT threshold or automatic feedback into Earth moment.
+
+References: [Livermore et al. (2017)](https://doi.org/10.1038/ngeo2859), [Landeau et al. (2022)](https://doi.org/10.1038/s43017-022-00264-1).
 
 ## Established/calibrated layer
 
@@ -28,7 +43,7 @@ Proton ram pressure is calculated from measured/assumed density and speed:
 
 `P_dyn[nPa] = 1.67262192595e-6 n_p[cm^-3] v[km/s]^2`.
 
-The 3-D dayside response uses the Shue et al. magnetopause model:
+A separate shared Shue boundary overlay responds only to solar-wind pressure and IMF Bz. It does not bend the superposed field or respond to arbitrary external sources. The application guard 0.05–100 nPa and |Bz|≤50 nT suppresses extrapolation; this is not a claimed universal fit domain:
 
 `r(theta) = r0 [2/(1+cos(theta))]^alpha`.
 
@@ -46,7 +61,7 @@ References:
 
 - [Gijs et al.-style magnetophoretic force derivation and Stokes balance](https://pmc.ncbi.nlm.nih.gov/articles/PMC3083238/)
 - [2023 review of magnetic/electromagnetic particle forces](https://doi.org/10.1039/D2LC00702A)
-- [Khain et al. (2021), charged droplets and atmospheric electric fields](https://doi.org/10.5194/acp-21-69-2021)
+- [Guo & Xue (2021), charged droplets and atmospheric electric fields](https://doi.org/10.5194/acp-21-69-2021)
 
 At geomagnetic field strengths these forces are expected to be extremely small for ordinary water droplets. The program therefore never presents the displayed magnetic-atmospheric drift as a measured effect.
 
@@ -118,6 +133,8 @@ The crustal hypothesis term is likewise reversible:
 `DeltaSigma_h = K_h |B_X|/(|B_E|+|B_X|)`.
 
 It does not accumulate like plate loading. `K_h=0` is the fault-model null control.
+
+Wave phase is imposed. Alignment, accumulation, ion production, CCN activation and cloud formation are distinct; visible periodicity does not prove a spontaneous mechanism. Exported Python fixes the opening snapshot and time=0 diagnostics, not stochastic trajectories or the complete weather texture.
 
 ## What would count as supporting evidence
 

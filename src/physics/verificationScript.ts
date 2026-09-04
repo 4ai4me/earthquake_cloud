@@ -1,3 +1,4 @@
+import { DEFAULT_RESEARCH, MODEL_SCHEMA_VERSION, ResearchConfig } from './fieldModel';
 import { AtmosphericCloudConfig, EarthDipoleConfig, ExternalMagneticSource, MoonConfig, SolarWindConfig } from '../types';
 
 export function buildVerificationPython(
@@ -5,13 +6,18 @@ export function buildVerificationPython(
   sources: ExternalMagneticSource[],
   solarWind: SolarWindConfig,
   cloud: AtmosphericCloudConfig,
-  moon: MoonConfig
+  moon: MoonConfig,
+  research: ResearchConfig = DEFAULT_RESEARCH
 ): string {
   const state = {
+    schemaVersion: MODEL_SCHEMA_VERSION, research,
     earth,
     sources: sources.filter((source) => source.active),
     solarWind,
     cloud: {
+      cloudAltitudeKm: cloud.cloudAltitudeKm ?? 12,
+      cloudLayerHalfWidthKm: cloud.cloudLayerHalfWidthKm ?? 1.5,
+      altitudeDisplayGain: cloud.altitudeDisplayGain ?? 1,
       interferenceThreshold: cloud.interferenceThreshold,
       sigmoidSteepness: cloud.sigmoidSteepness,
       waveWavelength: cloud.waveWavelength,
@@ -46,65 +52,104 @@ x = np.linspace(-5.0, 5.0, 300)
 y = np.linspace(-4.0, 4.0, 240)
 X, Y = np.meshgrid(x, y)
 
-def dipole_field(X, Y, x0, y0, moment, tilt_deg):
-    dx, dy = X - x0, Y - y0
-    r = np.sqrt(dx*dx + dy*dy + EPS*EPS)
-    c, s = np.cos(np.radians(tilt_deg)), np.sin(np.radians(tilt_deg))
-    xp, yp = dx*c + dy*s, -dx*s + dy*c
-    bxp = 3.0*moment*xp*yp / r**5
-    byp = moment*(2.0*yp*yp - xp*xp) / r**5
-    return bxp*c - byp*s, bxp*s + byp*c
+from decimal import Decimal, InvalidOperation
 
-earth = STATE['earth']
+def source_scale(src):
+    if 'fieldNt' not in src:
+        return src['strength']
+    raw = str(src['fieldNt']).replace('∞', 'Infinity')
+    try:
+        value = Decimal(raw)
+    except InvalidOperation as exc:
+        raise ValueError('Invalid fieldNt input') from exc
+    if not value.is_finite() or value < 0 or value > Decimal('1e100'):
+        raise ValueError('Extreme/log-direction mode: ordinary Python cloud/pressure calculations are unavailable; input is preserved in STATE.')
+    return float(value) / B_EQ_NT
+
+def dipole_field(X, Y, x0, y0, moment, tilt_deg, z0=0.0):
+    dx, dy, dz = X-x0, Y-y0, -z0
+    r2 = dx*dx+dy*dy+dz*dz
+    mx, my = -np.sin(np.radians(tilt_deg)), np.cos(np.radians(tilt_deg))
+    dot = mx*dx+my*dy
+    r5 = (r2+EPS*EPS)**2.5
+    return moment*(3*dx*dot-mx*r2)/r5, moment*(3*dy*dot-my*r2)/r5, moment*3*dz*dot/r5
+
+earth, sw, moon = STATE['earth'], STATE['solarWind'], STATE['moon']
 m = earth['moment'] * (-1.0 if earth['reversed'] else 1.0)
-Bx_e, By_e = dipole_field(X, Y, earth['x'], earth['y'], m, earth['tiltAngle'])
-Bx, By = Bx_e.copy(), By_e.copy()
-
+# Validate even sources not sampled by a particular plot.
 for src in STATE['sources']:
-    dx, dy = X - src['x'], Y - src['y']
-    r = np.sqrt(dx*dx + dy*dy + EPS*EPS)
-    if src['type'] in ('monopole_n', 'monopole_s'):
-        # Synthetic boundary-condition proxy; magnetic monopoles are not asserted.
-        q = abs(src['strength']) * (1.0 if src['type'] == 'monopole_n' else -1.0)
-        Bx += q*dx/r**3
-        By += q*dy/r**3
-    elif src['type'] == 'dipole':
-        sx, sy = dipole_field(X, Y, src['x'], src['y'], src['strength'], src.get('angle', 0.0))
-        Bx += sx
-        By += sy
-    elif src['type'] == 'comet':
-        # Same schematic coma/tail proxy used by the interactive renderer.
-        activity = src.get('cometGasActivity') or src['strength']
-        Bx += -0.35*activity*dx/r**3
-        By += -0.35*activity*dy/r**3
+    if src['type'] != 'comet':
+        source_scale(src)
 
-sw = STATE['solarWind']
-if sw['enabled']:
-    gain = max(1.0, sw.get('fieldVisualizationGain') or 1000.0)
-    Bx += sw['imfBx'] / B_EQ_NT * gain
-    By += sw['imfBz'] / B_EQ_NT * gain
+def total_field(X, Y, include_moon=True):
+    bx, by, bz = dipole_field(X,Y,earth['x'],earth['y'],m,earth['tiltAngle'])
+    for src in STATE['sources']:
+        dx,dy,dz = X-src['x'],Y-src['y'],-src.get('z',0.0)
+        r3 = (dx*dx+dy*dy+dz*dz+EPS*EPS)**1.5
+        scale = source_scale(src) if src['type'] != 'comet' else 0.0
+        if src['type'] in ('monopole_n','monopole_s'):
+            q = scale*(-1 if src['type']=='monopole_s' else 1)
+            bx,by,bz = bx+q*dx/r3,by+q*dy/r3,bz+q*dz/r3
+        elif src['type']=='dipole':
+            sx,sy,sz = dipole_field(X,Y,src['x'],src['y'],scale,src.get('angle',0.0),src.get('z',0.0))
+            bx,by,bz = bx+sx,by+sy,bz+sz
+        elif src['type']=='uniform':
+            a = np.radians(src.get('angle',0.0))
+            bx,by = bx-scale*np.sin(a),by+scale*np.cos(a)
+        elif src['type']=='comet':
+            activity = src.get('cometGasActivity',src['strength'])
+            length = src.get('cometTailLength',3.0)
+            width = 0.35+np.maximum(0,dx)*0.18
+            tail = np.where((dx>0)&(dx<length),np.exp(-(dy*dy+dz*dz)/(2*width*width))*np.exp(-np.maximum(0,dx)/max(length,1e-9)),0)
+            bx += -0.35*activity*dx/r3+activity*0.15*tail
+            by += -0.35*activity*dy/r3+np.sign(dy)*activity*0.08*tail
+            bz += -0.35*activity*dz/r3+np.sign(dz)*activity*0.08*tail
+    if sw['enabled']:
+        bx,by = bx+sw['imfBx']/B_EQ_NT,by+sw['imfBz']/B_EQ_NT
+    if include_moon and moon['enabled'] and moon.get('hypothesisDipoleEnabled',False):
+        angle = np.radians(moon['phaseAngleDeg'])
+        distance = moon.get('physicalDistanceEarthRadii',60.3)
+        sx,sy,sz = dipole_field(X,Y,earth['x']+distance*np.cos(angle),earth['y']+distance*np.sin(angle),
+                              moon['remanentMoment'],moon['remanentAngle']+moon['phaseAngleDeg'])
+        bx,by,bz = bx+sx,by+sy,bz+sz
+    return bx,by,bz
 
-Bmag = np.hypot(Bx, By)
+Bx_e, By_e, Bz_e = dipole_field(X,Y,earth['x'],earth['y'],m,earth['tiltAngle'])
+Bx, By, Bz = total_field(X,Y)
+
+Bmag = np.sqrt(Bx*Bx+By*By+Bz*Bz)
 B_tesla = Bmag * B_EQ_NT * 1e-9
 Pmag_npa = B_tesla**2 / (2.0*MU0) * 1e9
 
 # Dimensionless, unit-consistent perturbation diagnostic.
-Bx_x, By_x = Bx - Bx_e, By - By_e
+# Atmospheric diagnostic currently excludes the optional lunar dipole, matching the app.
+cloud_bx, cloud_by, cloud_bz = total_field(X,Y,include_moon=False)
+cloud_bmag = np.sqrt(cloud_bx**2+cloud_by**2+cloud_bz**2)
+Bx_x, By_x = cloud_bx - Bx_e, cloud_by - By_e
 Be, Bxmag = np.hypot(Bx_e, By_e), np.hypot(Bx_x, By_x)
 cross = np.abs(Bx_e*By_x - By_e*Bx_x)
 shear = cross / np.maximum(1e-9, Be*Bxmag)
 external_ratio = Bxmag / np.maximum(1e-9, Be + Bxmag)
-grad_y, grad_x = np.gradient(Bmag, y, x)
+def magnitude_at(x,y):
+    b = total_field(x,y,include_moon=False)
+    return np.sqrt(b[0]**2+b[1]**2+b[2]**2)
+h = 0.05
+grad_x = (magnitude_at(X+h,Y)-magnitude_at(X-h,Y))/(2*h)
+grad_y = (magnitude_at(X,Y+h)-magnitude_at(X,Y-h))/(2*h)
 grad_mag = np.hypot(grad_x, grad_y)
-g = np.tanh(max(0.1, earth['radius']) * grad_mag / np.maximum(1e-6, Bmag))
-alpha = np.clip(STATE['cloud'].get('gradientWeight') or 0.5, 0.0, 1.0)
+g = np.tanh(max(0.1, earth['radius']) * grad_mag / np.maximum(1e-6, np.hypot(cloud_bx,cloud_by)))
+alpha = np.clip(STATE['cloud'].get('gradientWeight',0.5), 0.0, 1.0)
 I = np.clip(external_ratio*((1.0-alpha)*shear + alpha*g), 0.0, 1.0)
 
-threshold = STATE['cloud'].get('interferenceThreshold') or 0.35
-steepness = STATE['cloud'].get('sigmoidSteepness') or 6.0
+threshold = STATE['cloud'].get('interferenceThreshold',0.35)
+steepness = STATE['cloud'].get('sigmoidSteepness',10.0)
 mask = 1.0/(1.0 + np.exp(np.clip(-steepness*(I-threshold), -50.0, 50.0)))
-wavelength = max(0.05, STATE['cloud'].get('waveWavelength') or 0.8)
-bhat_x, bhat_y = Bx/np.maximum(Bmag, 1e-9), By/np.maximum(Bmag, 1e-9)
+wavelength = max(0.05, STATE['cloud'].get('waveWavelength',0.3))
+driver = min(1.0,0.5*sw['pressure']/5+0.5*max(0,-sw['imfBz'])/20) if sw['enabled'] else 0.0
+stimulus = np.minimum(1.0,0.7*external_ratio+0.2*shear+0.1*driver)
+minimum = STATE['cloud'].get('externalStimulusThreshold',0.3)
+mask *= np.where(stimulus<minimum,np.clip(stimulus/max(0.01,minimum),0,1)**2,1.0)
+bhat_x, bhat_y = cloud_bx/np.maximum(cloud_bmag,1e-9), cloud_by/np.maximum(cloud_bmag,1e-9)
 npx, npy = -bhat_y, bhat_x
 phase = (2.0*np.pi/wavelength)*(npx*X + npy*Y)
 wave = 0.5*(1.0 + np.cos(phase))
@@ -167,7 +212,7 @@ if aero.get('enabled', False):
 A_h = np.clip(STATE['cloud'].get('hypothesisCoupling', 0.6), 0.0, 1.0)
 if STATE['cloud'].get('hypothesisEnabled', True) is False:
     A_h = 0.0
-hypothesis_delta = A_h * mask * wave
+hypothesis_delta = np.where(cloud_bmag<1e-4,0.0,A_h * mask * wave)
 coupled = np.clip(met_control + hypothesis_delta, 0.0, 1.0)
 
 # Solar-wind diagnostics and Shue et al. (1998) subsolar magnetopause.
@@ -175,12 +220,13 @@ n_cm3 = sw.get('densityCm3') or 5.0
 v_kms = sw.get('speedKmS') or 400.0
 pdyn_npa = 1.67262192595e-6*n_cm3*v_kms**2
 bz = sw['imfBz']
-r0 = (10.22 + 1.29*np.tanh(0.184*(bz+8.14))) * max(0.05, pdyn_npa)**(-1.0/6.6)
+pressure = sw['pressure']
+r0 = (10.22 + 1.29*np.tanh(0.184*(bz+8.14))) * pressure**(-1.0/6.6) if sw['enabled'] and 0.05<=pressure<=100 and abs(bz)<=50 else np.nan
 
 # Reversible tide and a synthetic circular-crack magnitude example.
 moon = STATE['moon']
 d_re = max(1.0, moon.get('physicalDistanceEarthRadii') or 60.3)
-tide_kpa = 4.0*np.clip(moon.get('tidalStressWeight', 1.0), 0.0, 1.0)*(60.3/d_re)**3
+tide_kpa = min(4.0,4.0*np.clip(moon.get('tidalStressWeight',1.0),0.0,1.0)*(60.3/d_re)**3) if moon['enabled'] else 0.0
 rupture_radius_km, stress_drop_mpa = 10.0, 3.0
 M0 = (16.0/7.0)*(stress_drop_mpa*1e6)*(rupture_radius_km*1000.0)**3
 Mw = (2.0/3.0)*(np.log10(M0)-9.1)
@@ -200,6 +246,7 @@ for ax in axes:
     ax.set_aspect('equal')
     ax.set_xlim(-5, 5)
     ax.set_ylim(-4, 4)
+fig.suptitle('Planar diagnostic functions, not physical cloud placement; time=0 snapshot. Cloud layer in app: '+str(STATE['cloud']['cloudAltitudeKm'])+' km')
 plt.tight_layout()
 plt.savefig('earthquake_cloud_hypothesis_control.png', dpi=300)
 

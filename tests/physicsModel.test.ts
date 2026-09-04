@@ -9,7 +9,7 @@ import {
 } from '../src/types';
 import {
   calculateEarthDipoleField,
-  computeExternalMagnetosphereDistortion3D,
+
   computeInterferenceIntensity,
   computeWaveCloudDensity,
 } from '../src/physics/magneticEngine';
@@ -68,22 +68,16 @@ test('dimensionless interference stays bounded and null control is exactly zero'
   assert.equal(control.hypothesisContribution, 0);
 });
 
-test('3D external-source deformation is inactive at control and bounded under strong forcing', () => {
-  assert.deepEqual(computeExternalMagnetosphereDistortion3D(2, 0, 0, []), {
-    dx: 0,
-    dy: 0,
-    dz: 0,
-    influence: 0,
-  });
-
-  const north = [{ id: 'n', name: 'north', type: 'monopole_n' as const, x: 0, y: 0, strength: 100, active: true }];
-  const south = [{ ...north[0], id: 's', name: 'south', type: 'monopole_s' as const }];
-  const northResult = computeExternalMagnetosphereDistortion3D(2, 0, 0, north);
-  const southResult = computeExternalMagnetosphereDistortion3D(2, 0, 0, south);
-  assert.ok(northResult.dx > 0);
-  assert.ok(southResult.dx < 0);
-  assert.ok(Math.hypot(northResult.dx, northResult.dy, northResult.dz) <= 1.800001);
-  assert.ok(Math.hypot(southResult.dx, southResult.dy, southResult.dz) <= 1.800001);
+test('2D slice and 3D use the same field; external-source response is not a bounded displacement effect', async () => {
+  const { sampleField, normalizedComponents } = await import('../src/physics/fieldModel');
+  const context = { earth: DEFAULT_EARTH_DIPOLE, sources: [{ id:'d',name:'dipole',type:'dipole' as const,x:4,y:1,strength:1,fieldNt:'100',active:true }], solar: DEFAULT_SOLAR_WIND };
+  const before=sampleField({x:2,y:1,z:0},context);
+  const after=sampleField({x:2,y:1,z:0},{...context,sources:[{...context.sources[0],fieldNt:'1e6'}]});
+  assert.ok(Math.abs(before.x-after.x)+Math.abs(before.y-after.y)>0.1);
+  const {computeTotalMagneticField}=await import('../src/physics/magneticEngine');
+  const slice=computeTotalMagneticField(2,1,context.earth,context.sources,context.solar);
+  const full=normalizedComponents(before);
+  assert.equal(slice.bx,full.bx);assert.equal(slice.by,full.by);assert.equal(slice.magnitude,full.magnitude);
 });
 
 test('tidal and magnetic perturbations do not accumulate as tectonic load', () => {
@@ -116,7 +110,7 @@ test('Python export contains the same control separation and calibrated equation
 
   const python = spawnSync(
     'python',
-    ['-c', "import sys; compile(sys.stdin.read(), '<verification-export>', 'exec')"],
+    ['-X', 'utf8', '-c', "import sys; compile(sys.stdin.read(), '<verification-export>', 'exec')"],
     { input: script, encoding: 'utf8' }
   );
   assert.equal(python.status, 0, python.stderr || 'generated Python failed to compile');

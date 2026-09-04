@@ -28,192 +28,175 @@ import { LayerVisibilityConfig, VisualElementGuideItem } from '../types';
 
 export const VISUAL_ELEMENTS_DATA: VisualElementGuideItem[] = [
   {
-    id: 'earthBody',
-    category: 'core',
-    name: '지구 본체 및 대기 헤일로',
-    badge: 'Earth Body & Atmosphere Halo',
-    color: '#38bdf8',
-    formulaSymbol: 'R_E, \\text{Atmosphere}',
-    summary: '지구 구체 및 열권·중간권 대기 광륜',
-    physicsDescription:
-      '지구 자기장(쌍극자 모멘트)의 원점이자 전자기 유도 전류가 지각으로 침투하는 중심 행성체입니다. 외곽의 청록색 광륜은 열권 및 전리층(Ionosphere) 대기층을 나타내며, 하전 입자들의 1차 이온화 층입니다.',
+    "id": "earthBody",
+    "category": "core",
+    "name": "지구 본체 및 대기 헤일로",
+    "badge": "earthBody",
+    "color": "#67e8f9",
+    "formulaSymbol": "",
+    "summary": "지구 반경과 설명용 대기 광륜",
+    "physicsDescription": "1 R_E=6,371 km. 광륜 두께는 실제 대기층 경계가 아니다. 구름 위치는 별도의 고도 설정을 따른다."
   },
   {
-    id: 'dipoleAxis',
-    category: 'core',
-    name: '자기 쌍극자 축 & N/S 자극',
-    badge: 'Magnetic Dipole Axis (N/S)',
-    color: '#ef4444',
-    formulaSymbol: '\\mathbf{m}_E, \\theta_{\\text{tilt}}',
-    summary: '지자기 자축 경사각 및 지자기 북극(N)/남극(S) 마커',
-    physicsDescription:
-      '지구 자전축 대비 기울어진 지자기 모멘트 벡터 축(기본 약 11.5° 경사)입니다. 적색 마커는 지자기 북극(N극, 자기력선 발산), 청색 마커는 지자기 남극(S극, 자기력선 수렴)을 표시하며, 지자기 역전 시 극성이 반전됩니다.',
+    "id": "dipoleAxis",
+    "category": "core",
+    "name": "자기 쌍극자 축 & N/S 자극",
+    "badge": "dipoleAxis",
+    "color": "#67e8f9",
+    "formulaSymbol": "",
+    "summary": "모델의 자기 모멘트 방향",
+    "physicsDescription": "N/S는 모델 자극의 방향이며 지리적 북극/남극과 구분한다. 지구 모멘트와 경사로 계산한다."
   },
   {
-    id: 'crustalNodes',
-    category: 'core',
-    name: '지각 단층 응력 노드 & 고응력 점멸',
-    badge: 'Crustal Fault Stress Nodes',
-    color: '#22c55e',
-    formulaSymbol: '\\sigma_i, \\sigma_{\\text{crit}}',
-    summary: '지구 표면 48개 단층 분절의 응력 축적 상태',
-    physicsDescription:
-      '지각 단층면의 국소 전단 응력(Shear Stress)을 48개 노드로 분할 시뮬레이션합니다. 안전(녹색) → 주의(황색) → 임계(적색 점멸)로 전이되며, 주변 자기장 간섭률 및 유도 기전력(EMF)에 의해 응력 누적이 가속되어 파쇄(지진)를 유발합니다.',
+    "id": "crustalNodes",
+    "category": "core",
+    "name": "가설: 지각 단층 응력 노드",
+    "badge": "crustalNodes",
+    "color": "#67e8f9",
+    "formulaSymbol": "",
+    "summary": "합성 단층 실패지수",
+    "physicsDescription": "반드시 가설: 판구조 하중과 가역적 조석·선택적 자기 결합을 비교하는 합성 노드다. 실제 단층 관측이나 지진 예측 결과가 아니다."
   },
   {
-    id: 'streamlines',
-    category: 'field',
-    name: 'RK4 자기력선 & 에너지 펄스',
-    badge: 'RK4 Magnetic Streamlines',
-    color: '#67e8f9',
-    formulaSymbol: '\\frac{d\\mathbf{r}}{ds} = \\frac{\\mathbf{B}}{|\\mathbf{B}|}',
-    summary: '4차 룬게-쿠타 적분 자기력선 및 흐름 펄스',
-    physicsDescription:
-      '지구 쌍극자, 외부 다극자, 태양풍 IMF의 벡터 합성 자기장 공간에서 4차 룬게-쿠타(RK4) 정밀 수치 적분으로 추적한 자기력선입니다. 선 위를 달리는 청록색 펄스는 국소 자기장 세기에 비례하는 플럭스 밀도와 에너지 흐름 방향을 나타냅니다.',
+    "id": "streamlines",
+    "category": "field",
+    "name": "RK4 자기력선 & 표시 펄스",
+    "badge": "streamlines",
+    "color": "#67e8f9",
+    "formulaSymbol": "",
+    "summary": "공유 3D 벡터장 적분 곡선",
+    "physicsDescription": "dr/ds=B/|B|를 RK4로 적분한다. 색은 고정 로그 nT 눈금. 움직이는 점은 방향 설명이며 실제 에너지·입자 수송 해가 아니다."
   },
   {
-    id: 'neutralPoints',
-    category: 'field',
-    name: '자기 재결합 중성점 (X-Point)',
-    badge: 'Magnetic Reconnection X-Point',
-    color: '#ec4899',
-    formulaSymbol: '|\\mathbf{B}_{\\text{total}}| \\to 0',
-    summary: '자기장이 0에 수렴하여 재결합이 일어나는 Null-Point',
-    physicsDescription:
-      '서로 반대 방향의 자기력선이 충돌하여 상쇄되는 자기 중성점(Null-Point)입니다. 이곳에서는 이상 저항(Anomalous Resistivity)과 자기 에너지의 폭발적 플라즈마 운동 에너지 변환(Magnetic Reconnection)이 발생하며 핑크색 교차 링(X-Point)으로 표시됩니다.',
+    "id": "neutralPoints",
+    "category": "field",
+    "name": "자기 중성점 후보 (X-Point)",
+    "badge": "neutralPoints",
+    "color": "#67e8f9",
+    "formulaSymbol": "",
+    "summary": "작은 합성장을 찾는 수치 진단",
+    "physicsDescription": "|B|가 작다는 사실만으로 자기 재결합이 증명되지 않는다. 이 앱은 저항성 MHD나 재결합률을 계산하지 않는다."
   },
   {
-    id: 'externalSources',
-    category: 'field',
-    name: '외부 자기원 (합성 극 프록시/쌍극자/혜성)',
-    badge: 'External Magnetic Sources & Comet',
-    color: '#a855f7',
-    formulaSymbol: '\\mathbf{B}_{\\text{ext}}, q_m, \\mathbf{B}_{\\text{comet}}',
-    summary: '지구 근방을 통과하는 행성간 천체, 혜성 및 인공 자기원',
-    physicsDescription:
-      '접근하는 강한 자화 천체, 혜성(이온 꼬리 자기장 드레이핑 및 충격파 공동), 행성간 자기 이상체를 모사합니다. 적색(N극), 청색(S극), 보라색(쌍극자), 에메랄드(혜성)로 표시되며 드래그로 이동하거나 궤도 공전시킬 수 있습니다.',
+    "id": "externalSources",
+    "category": "field",
+    "name": "외부 자기원 (쌍극자/균일장/가설)",
+    "badge": "externalSources",
+    "color": "#67e8f9",
+    "formulaSymbol": "",
+    "summary": "외부 벡터장과 자기원 표시",
+    "physicsDescription": "쌍극자는 N/S 한 쌍이며 각도·자체 회전·공전이 가능하다. 균일장은 국소 근사. 반드시 가설: 독립 단극자와 혜성 프록시는 관측 천체의 정밀 재현이 아니다."
   },
   {
-    id: 'moonBody',
-    category: 'core',
-    name: '지구 자연 위성 (달 Moon)',
-    badge: 'Moon Satellite & Crustal Dipole',
-    color: '#e2e8f0',
-    formulaSymbol: 'R_{\\text{Moon}}, \\mathbf{m}_{\\text{crust}}',
-    summary: '달 본체 구체 및 국소 지각 잔류 자기 모멘트',
-    physicsDescription:
-      '지구의 자연 위성인 달(반경 ~1,737km, 지구 반경의 약 27%)을 모사합니다. 달 자체의 고유 다이나모는 없으나 국소 지각 잔류 자기장(Lunar Swirl Remanent Dipole) 및 태양풍 플라즈마 후류 공동(Downstream Wake Cavity)을 형성합니다.',
+    "id": "moonBody",
+    "category": "core",
+    "name": "지구 자연 위성 (달 Moon)",
+    "badge": "moonBody",
+    "color": "#67e8f9",
+    "formulaSymbol": "",
+    "summary": "달 본체와 동주기 자전",
+    "physicsDescription": "현재 달에는 지구와 같은 전역 자기장이 없다. 기본 자기 결합은 OFF. 반드시 가설: 선택한 달 전역 쌍극자는 국소 지각장을 대신하는 검증된 모델이 아니다."
   },
   {
-    id: 'moonOrbit',
-    category: 'core',
-    name: '달 공전 궤도 및 위상 (Orbit & Phase)',
-    badge: 'Lunar Orbit Ring (R_EM)',
-    color: '#94a3b8',
-    formulaSymbol: 'd_{EM} \\approx 60.3R_E \\approx 384,400\\text{km}, T = 27.3\\text{d}',
-    summary: '달의 공전 궤도 원 및 삭-상현-망-하현 위상각',
-    physicsDescription:
-      '지구 중심을 기준으로 한 달의 공전 궤도 경로(원형 궤도선)입니다. 지구 자기권 꼬리(Magnetotail) 통과 여부 및 태양과의 상대적 각도(위상각 θ_M)에 따른 시뮬레이션 환경을 시각화합니다.',
+    "id": "moonOrbit",
+    "category": "core",
+    "name": "달 공전 궤도 및 위상",
+    "badge": "moonOrbit",
+    "color": "#67e8f9",
+    "formulaSymbol": "",
+    "summary": "기본 거리 60.3 R_E의 원궤도",
+    "physicsDescription": "공전주기 27.3일, 1초당 진행 일수로 시각화 시간을 조절한다. 실제 궤도 이심률·기울기·태양 운동은 생략한 근사다."
   },
   {
-    id: 'lunarTideBulge',
-    category: 'core',
-    name: '달 기조력 조석 팽창 타원 (Tidal Bulge)',
-    badge: 'Solid Earth Tidal Bulge',
-    color: '#38bdf8',
-    formulaSymbol: '\\Delta \\sigma_{\\text{tide}} \\propto \\frac{G M_M}{R^3} \\cos(2\\Delta\\theta)',
-    summary: '달의 차등 중력에 의한 고체 지구 조석 변형 타원',
-    physicsDescription:
-      '달의 인력에 의해 발생하는 고체 지구(Solid Earth)의 조석 팽창 타원체입니다. 대향측(Antipodal)과 직하점(Sublunar) 방향으로 지각 인장/압축 응력이 집중되어 지진 단층 파쇄를 주기적으로 변조합니다.',
+    "id": "lunarTideBulge",
+    "category": "core",
+    "name": "조석 변형 설명도",
+    "badge": "lunarTideBulge",
+    "color": "#67e8f9",
+    "formulaSymbol": "",
+    "summary": "고체 지구 조석의 확대 표시",
+    "physicsDescription": "반드시 가설: 모델 단층 응력의 가역 섭동을 비교한다. 타원은 실제 변형 크기가 아니고 파열 시점의 예측이 아니다."
   },
   {
-    id: 'solarWind',
-    category: 'atmosphere',
-    name: '태양풍 플라즈마 & IMF 유선',
-    badge: 'Solar Wind & IMF Flow',
-    color: '#fbbf24',
-    formulaSymbol: 'P_{\\text{dyn}} = \\rho v_{\\text{sw}}^2, \\mathbf{B}_{\\text{IMF}}',
-    summary: '태양에서 유입되는 초음속 이온류 및 행성간 자기장',
-    physicsDescription:
-      '태양에서 초속 400~800km/s로 분출되는 하전 입자류입니다. 주간면(좌측) 자기권을 강하게 압축(Chapman-Ferraro 전류 형성)하고, 황금색 이온 입자 및 유입 화살표로 공간 전파 경로를 시각화합니다.',
+    "id": "solarWind",
+    "category": "atmosphere",
+    "name": "태양풍 · IMF · 자기권계면",
+    "badge": "solarWind",
+    "color": "#67e8f9",
+    "formulaSymbol": "",
+    "summary": "동압과 Shue 경험적 경계",
+    "physicsDescription": "IMF nT에 시각적 배율을 곱하지 않는다. Shue 경계는 태양풍 조건의 별도 경험식이며 임의 외부 자기원에 대한 완전한 자기권 응답은 아니다."
   },
   {
-    id: 'cloudParticles',
-    category: 'atmosphere',
-    name: '대기 에어로졸 입자 & 극화 바늘',
-    badge: 'Aerosol Droplets & Polarized Needles',
-    color: '#e0f2fe',
-    formulaSymbol: '\\mathbf{p} = \\alpha \\mathbf{B}_{\\text{loc}}, \\theta_p',
-    summary: '하전 대기 입자 및 지자기 방향 편광 정렬 바늘',
-    physicsDescription:
-      '대기 중에 부유하는 미세 하전 물방울과 에어로졸 입자입니다. 국소 자기장 벡터에 의해 유도 전기쌍극자 모멘트가 형성되어 입자 중심의 미세 백색 바늘(Needle)이 자기력선 방향으로 정렬됩니다 (가상 지진운의 미시적 기전).',
+    "id": "cloudParticles",
+    "category": "atmosphere",
+    "name": "가설: 대기 입자 & 정렬 바늘",
+    "badge": "cloudParticles",
+    "color": "#67e8f9",
+    "formulaSymbol": "",
+    "summary": "지정 고도층의 공유 입자 단면",
+    "physicsDescription": "반드시 가설: 정렬 바늘은 가정한 방향 반응이다. 자기장이 전기 쌍극자를 직접 만든다고 가정하지 않는다. 3D도 동일한 z=0 입자를 표시하며 분자·이온을 개별 추적하지 않는다."
   },
   {
-    id: 'cloudBands',
-    category: 'atmosphere',
-    name: '결맞음 구름 띠 (Coherent Cloud Bands)',
-    badge: 'Coherent Cloud Ridge Bands',
-    color: '#93c5fd',
-    formulaSymbol: '\\text{Ridge}(p_i, p_j)',
-    summary: '인접 정렬 입자들이 자기력선을 따라 형성하는 구름 띠',
-    physicsDescription:
-      '인접한 하전 입자들의 극화 정렬 각도가 높은 결맞음(Coherence)을 보일 때, 자기력선 궤적을 따라 형성되는 선형 응결 띠입니다. 푸른빛이 감도는 수증기 띠 형태로 시각화됩니다.',
+    "id": "cloudBands",
+    "category": "atmosphere",
+    "name": "기상 구름층 기준선",
+    "badge": "cloudBands",
+    "color": "#67e8f9",
+    "formulaSymbol": "",
+    "summary": "지정 고도층의 구름 프록시",
+    "physicsDescription": "기상·습도에 따른 설명용 구름 점수. 기본 12±1.5 km의 지정 층이며 입자의 자발적 구름 생성이나 실측 영상이 아니다."
   },
   {
-    id: 'waveClouds',
-    category: 'atmosphere',
-    name: '국소 정렬 양떼구름 (Wave Cloud Hotspot)',
-    badge: 'Altocumulus Wave Cloud Hotspots',
-    color: '#38bdf8',
-    formulaSymbol: 'I(x,y) > I_{\\text{th}}, \\lambda_{\\text{wave}}',
-    summary: '전자기 간섭 핫스팟에서 자기장에 수직으로 형성되는 파동운',
-    physicsDescription:
-      '지구 자기장과 외부 자기원의 간섭 강도 I(x,y)가 임계치를 초과하는 핫스팟에서, 자기장 벡터에 직교하는 방향으로 형성되는 주기적 파동 구름(Altocumulus Billows)입니다. 방사형 퍼프와 직교 파면 리지로 표현됩니다.',
+    "id": "waveClouds",
+    "category": "atmosphere",
+    "name": "가설: 주기적 구름 패턴",
+    "badge": "waveClouds",
+    "color": "#67e8f9",
+    "formulaSymbol": "",
+    "summary": "외부장 결합을 가정한 파동 무늬",
+    "physicsDescription": "반드시 가설: cos 위상과 파장을 부여한 패턴이다. 입자 정렬만으로 이 무늬가 필연적으로 생긴다는 증거가 아니다. 고도·표시 배율은 2D/3D에 함께 적용한다."
   },
   {
-    id: 'seismicWaves',
-    category: 'event',
-    name: '지진 전파 충격파 (P파 / S파)',
-    badge: 'Seismic Shockwaves (P/S Waves)',
-    color: '#f97316',
-    formulaSymbol: 'v_P \\approx 6.0\\text{km/s}, v_S \\approx 3.5\\text{km/s}',
-    summary: '단층 파쇄 시 진원에서 방사되는 지진 탄성파 파면',
-    physicsDescription:
-      '지각 응력 파쇄 시 진원(Epicenter)에서 발생하여 사방으로 전파되는 지진 종파(적색 P파, 압축파) 및 횡파(주황색 S파, 전단파)의 팽창 동심원 파면입니다.',
+    "id": "seismicWaves",
+    "category": "event",
+    "name": "가설: 파열 파면 표시",
+    "badge": "seismicWaves",
+    "color": "#67e8f9",
+    "formulaSymbol": "",
+    "summary": "합성 사건의 확대 애니메이션",
+    "physicsDescription": "반드시 가설: 가상 파열 위치에서 확장하는 설명용 원이다. 실제 지층의 P/S파 전파나 지진 도달 시각을 풀지 않는다."
   },
   {
-    id: 'heatmap',
-    category: 'field',
-    name: '2D 자기장 스칼라 히트맵 배경',
-    badge: '2D Field Scalar Heatmap',
-    color: '#a855f7',
-    formulaSymbol: '|\\mathbf{B}|, \\nabla|\\mathbf{B}|, P_{\\text{mag}}, I(x,y)',
-    summary: '공간 자기장 세기, 기울기, 자기압, 간섭도의 격자 컬러맵',
-    physicsDescription:
-      '전체 시뮬레이션 영역을 2D 격자로 샘플링하여 선택된 물리 지표(자기장 크기, 자기압 B²/2, 공간 기울기, 간섭도, 파동운 밀도)의 공간 분포를 부드러운 컬러 그라디언트로 표시합니다.',
+    "id": "heatmap",
+    "category": "field",
+    "name": "2D 자기장 진단 히트맵",
+    "badge": "heatmap",
+    "color": "#67e8f9",
+    "formulaSymbol": "",
+    "summary": "선택한 스칼라 지표의 비교 지도",
+    "physicsDescription": "자기압은 B²/(2μ₀), 간섭 지수는 무차원이다. 초대형·극한 입력에서는 일반 수치 진단을 중단한다. 색 밝기 자체가 물리 단위는 아니다."
   },
   {
-    id: 'gridAxes',
-    category: 'system',
-    name: '좌표 격자망 & 중심축',
-    badge: 'Coordinate Grid & Origin Axes',
-    color: '#64748b',
-    formulaSymbol: '(x, y) \\in [-6, 6] R_E',
-    summary: '지구 중심 기준 공간 거리(지구 반지름 R_E) 격자 및 원점축',
-    physicsDescription:
-      '지구 중심 (0,0)을 기준으로 지구 반지름 단위(R_E)의 공간 스케일 직교 좌표망과 십자 중심축을 표시하여 천체 및 장의 위치 관계를 정량적으로 파악할 수 있습니다.',
+    "id": "gridAxes",
+    "category": "system",
+    "name": "거리 눈금 · 좌표 격자",
+    "badge": "gridAxes",
+    "color": "#67e8f9",
+    "formulaSymbol": "",
+    "summary": "지구 중심 거리 R_E / km",
+    "physicsDescription": "거리 원과 눈금은 지구 중심 기준. 지표 고도와 중심 거리를 구분한다. 3D 원은 z=0 단면의 눈금이다."
   },
   {
-    id: 'probeMarker',
-    category: 'system',
-    name: '우클릭 정밀 프로브 마커 & 타겟',
-    badge: 'Right-Click Vector Probe Target',
-    color: '#22d3ee',
-    formulaSymbol: '\\mathbf{B}(x_0, y_0), \\nabla|\\mathbf{B}|, M(x,y)',
-    summary: '사용자가 우클릭한 측정 지점의 십자선 조준선 및 데이터 카드',
-    physicsDescription:
-      '캔버스 위를 마우스 우클릭했을 때 생성되는 실시간 프로브 타겟입니다. 해당 지점의 2D 자기장 벡터 성분, 공간 미분량, 전자기 간섭도, 파동운 마스크 확률 등을 정밀 측정합니다.',
-  },
+    "id": "probeMarker",
+    "category": "system",
+    "name": "우클릭 프로브 · 중심 거리",
+    "badge": "probeMarker",
+    "color": "#67e8f9",
+    "formulaSymbol": "",
+    "summary": "선택 위치의 진단과 거리",
+    "physicsDescription": "2D는 선택 좌표의 장을 계산한다. 3D는 시선과 z=0 단면 교점의 거리를 측정하며 구체 표면의 자동 측정은 아니다."
+  }
 ];
 
 export const DEFAULT_LAYER_VISIBILITY: LayerVisibilityConfig = {
@@ -240,20 +223,22 @@ interface VisualElementsGuidePanelProps {
   layerVisibility: LayerVisibilityConfig;
   setLayerVisibility: React.Dispatch<React.SetStateAction<LayerVisibilityConfig>>;
   defaultExpanded?: boolean;
+  supportedLayers?: Array<keyof LayerVisibilityConfig>;
 }
 
 export const VisualElementsGuidePanel: React.FC<VisualElementsGuidePanelProps> = ({
   layerVisibility,
   setLayerVisibility,
   defaultExpanded = false,
+  supportedLayers = Object.keys(DEFAULT_LAYER_VISIBILITY) as Array<keyof LayerVisibilityConfig>,
 }) => {
   const [isExpanded, setIsExpanded] = useState<boolean>(defaultExpanded);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [expandedItemId, setExpandedItemId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  const activeCount = Object.values(layerVisibility).filter(Boolean).length;
-  const totalCount = Object.keys(layerVisibility).length;
+  const activeCount = supportedLayers.filter(key=>layerVisibility[key]).length;
+  const totalCount = supportedLayers.length;
 
   const toggleLayer = (key: keyof LayerVisibilityConfig) => {
     setLayerVisibility((prev) => ({
@@ -262,53 +247,10 @@ export const VisualElementsGuidePanel: React.FC<VisualElementsGuidePanelProps> =
     }));
   };
 
-  const handleShowAll = () => {
-    setLayerVisibility({
-      earthBody: true,
-      dipoleAxis: true,
-      crustalNodes: true,
-      streamlines: true,
-      solarWind: true,
-      neutralPoints: true,
-      externalSources: true,
-      moonBody: true,
-      moonOrbit: true,
-      lunarTideBulge: true,
-      cloudParticles: true,
-      cloudBands: true,
-      waveClouds: true,
-      seismicWaves: true,
-      gridAxes: true,
-      heatmap: true,
-      probeMarker: true,
-    });
-  };
-
-  const handleHideAll = () => {
-    setLayerVisibility({
-      earthBody: false,
-      dipoleAxis: false,
-      crustalNodes: false,
-      streamlines: false,
-      solarWind: false,
-      neutralPoints: false,
-      externalSources: false,
-      moonBody: false,
-      moonOrbit: false,
-      lunarTideBulge: false,
-      cloudParticles: false,
-      cloudBands: false,
-      waveClouds: false,
-      seismicWaves: false,
-      gridAxes: false,
-      heatmap: false,
-      probeMarker: false,
-    });
-  };
-
-  const handleResetDefaults = () => {
-    setLayerVisibility(DEFAULT_LAYER_VISIBILITY);
-  };
+  const setAll=(value:boolean)=>setLayerVisibility(prev=>({...prev,...Object.fromEntries(supportedLayers.map(key=>[key,value]))}));
+  const handleShowAll=()=>setAll(true);
+  const handleHideAll=()=>setAll(false);
+  const handleResetDefaults=()=>setLayerVisibility(prev=>({...prev,...Object.fromEntries(supportedLayers.map(key=>[key,DEFAULT_LAYER_VISIBILITY[key]]))}));
 
   const filteredItems = VISUAL_ELEMENTS_DATA.filter((item) => {
     const matchesCat = selectedCategory === 'all' || item.category === selectedCategory;
@@ -317,7 +259,7 @@ export const VisualElementsGuidePanel: React.FC<VisualElementsGuidePanelProps> =
       item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       item.badge.toLowerCase().includes(searchQuery.toLowerCase()) ||
       item.summary.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesCat && matchesSearch;
+    return supportedLayers.includes(item.id) && matchesCat && matchesSearch;
   });
 
   const getCategoryIcon = (cat: string) => {
@@ -342,8 +284,9 @@ export const VisualElementsGuidePanel: React.FC<VisualElementsGuidePanelProps> =
       {/* Collapsed Bar / Trigger Pill */}
       {!isExpanded ? (
         <button
+          aria-expanded={false}
           onClick={() => setIsExpanded(true)}
-          className="flex items-center gap-2 px-3 py-1.5 bg-[#0f0f15]/95 hover:bg-[#161622] text-slate-200 hover:text-white rounded-lg border border-[#252535] hover:border-cyan-500/50 shadow-xl backdrop-blur-md transition-all text-xs group"
+          className="flex max-w-full flex-wrap items-center gap-2 px-3 py-1.5 bg-[#0f0f15]/95 hover:bg-[#161622] text-slate-200 hover:text-white rounded-lg border border-[#252535] hover:border-cyan-500/50 shadow-xl backdrop-blur-md transition-all text-xs group"
           title="화면 시각화 요소 가이드 및 레이어 표시/숨김 패널 열기"
         >
           <div className="flex items-center gap-1.5 text-cyan-400 font-semibold">
@@ -359,7 +302,7 @@ export const VisualElementsGuidePanel: React.FC<VisualElementsGuidePanelProps> =
         </button>
       ) : (
         /* Expanded Floating Guide & Layer Panel */
-        <div className="w-full max-w-[480px] bg-[#0c0c12]/98 backdrop-blur-xl border border-[#262638] rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[82vh] transition-all animate-in fade-in zoom-in-95 duration-200">
+        <div className="w-full max-w-[480px] bg-[#0c0c12]/98 backdrop-blur-xl border border-[#262638] rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[min(70vh,450px)] transition-all animate-in fade-in zoom-in-95 duration-200">
           {/* Header Bar with Fold Button */}
           <div className="p-3 bg-gradient-to-r from-[#12121c] via-[#161626] to-[#12121c] border-b border-[#222234] flex items-center justify-between">
             <div className="flex items-center gap-2">

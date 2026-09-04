@@ -16,6 +16,8 @@ import {
   DEFAULT_SOLAR_WIND,
 } from './types';
 import { CloudParticleSystem } from './physics/cloudParticleEngine';
+import { advanceMoon, advanceSource, DEFAULT_RESEARCH, ResearchConfig, needsLogOnly } from './physics/fieldModel';
+import { KnowledgePage } from './components/KnowledgePage';
 import { CrustalStressManager } from './physics/crustalStressEngine';
 import { GLOBAL_WEATHER_PRESETS } from './physics/weatherEngine';
 import { SimulationCanvas2D } from './components/SimulationCanvas2D';
@@ -86,6 +88,11 @@ export default function App() {
   const particleSystem = useMemo(() => new CloudParticleSystem(500), []);
 
   // 8. View & UI State
+  const [research, setResearch] = useState<ResearchConfig>({ ...DEFAULT_RESEARCH });
+  const [isPlaying, setIsPlaying] = useState(true);
+  const [knowledgeOpen, setKnowledgeOpen] = useState(false);
+  const closeKnowledge = useCallback(() => setKnowledgeOpen(false), []);
+  const closePython = useCallback(() => setIsPythonModalOpen(false), []);
   const [viewMode, setViewMode] = useState<'2D' | '3D' | 'split'>('2D');
   const [renderMode, setRenderMode] = useState<RenderMode>('composite');
   const [heatmapMetric, setHeatmapMetric] = useState<HeatmapMetric>('magnitude');
@@ -141,10 +148,36 @@ export default function App() {
     }, 6000);
   }, []);
 
+  const clockState = useRef({ isPlaying, earthConfig, sources, solarWind, moonConfig, cloudConfig });
+  clockState.current = { isPlaying, earthConfig, sources, solarWind, moonConfig, cloudConfig };
+  useEffect(() => {
+    let last = performance.now();
+    const timer = window.setInterval(() => {
+      const now = performance.now(), dt = Math.min(0.2, (now-last)/1000); last=now;
+      const state = clockState.current;
+      if (!state.isPlaying || document.hidden) return;
+      setMoonConfig(prev => advanceMoon(prev, dt));
+      setSources(prev => {
+        let changed = false;
+        const next = prev.map(source => {
+          const updated=advanceSource(source,state.earthConfig,dt);
+          if(updated!==source)changed=true;
+          return updated;
+        });
+        return changed ? next : prev;
+      });
+      if (!needsLogOnly({ earth:state.earthConfig, sources:state.sources, solar:state.solarWind, moon:state.moonConfig })) {
+        particleSystem.update(state.cloudConfig, state.earthConfig, state.sources, state.solarWind, dt, now/1000);
+        stressManager.update(state.earthConfig, state.sources, state.solarWind, dt, handleEarthquakeTriggered, state.moonConfig);
+      }
+    }, 100);
+    return () => clearInterval(timer);
+  }, [particleSystem, stressManager, handleEarthquakeTriggered]);
+
   // Preset Scenario Applier
   const handleApplyPreset = (presetKey: string) => {
     if (presetKey === 'quiet') {
-      setEarthConfig((prev) => ({ ...prev, moment: 2.5, tiltAngle: 0, reversed: false, x: 0, y: 0 }));
+      setEarthConfig((prev) => ({ ...prev, moment: 1, tiltAngle: 0, reversed: false, x: 0, y: 0 }));
       setSources([]);
       setSolarWind((prev) => ({ ...prev, enabled: false }));
       setMoonConfig((prev) => ({ ...prev, enabled: true, phaseAngleDeg: 45, autoOrbit: true }));
@@ -168,8 +201,8 @@ export default function App() {
       setSources([
         {
           id: 'ext-n',
-          name: '우주 외부 N극',
-          type: 'monopole_n',
+          name: '가설 외부 쌍극자 A',
+          type: 'dipole',
           x: 2.5,
           y: 1.2,
           strength: 3.2,
@@ -181,8 +214,9 @@ export default function App() {
         },
         {
           id: 'ext-s',
-          name: '우주 외부 S극',
-          type: 'monopole_s',
+          name: '가설 외부 쌍극자 B',
+          type: 'dipole',
+          angle: 180,
           x: -2.8,
           y: -1.5,
           strength: 2.8,
@@ -258,7 +292,8 @@ export default function App() {
         enabled: true,
         phaseAngleDeg: 180, // Full Moon entering magnetotail
         tidalStressWeight: 0.45,
-        remanentMoment: 0.22,
+        remanentMoment: 0,
+        hypothesisDipoleEnabled: false,
         autoOrbit: true,
         orbitSpeed: 0.5,
       });
@@ -271,7 +306,8 @@ export default function App() {
         {
           id: 'dense-pole',
           name: '집중 자기 교란원',
-          type: 'monopole_s',
+          type: 'dipole',
+          angle: 180,
           x: 1.5,
           y: 0.2,
           strength: 4.5,
@@ -333,6 +369,8 @@ export default function App() {
       particleSystem.init(500);
     }
 
+    setResearch({ ...DEFAULT_RESEARCH });
+    setIsPlaying(true);
     setLatestEarthquake(null);
     setRenderMode('composite');
     setHeatmapMetric('magnitude');
@@ -364,6 +402,7 @@ export default function App() {
 
         {/* View Switchers & Export Actions */}
         <div className="flex shrink-0 items-center gap-1.5 xl:gap-2">
+          <button onClick={() => setKnowledgeOpen(true)} className="rounded border border-cyan-800 px-2 py-1 text-xs text-cyan-200">용어·이론 해설</button>
           {/* Global Simulation Reset Button */}
           <button
             id="btn-global-reset-simulation"
@@ -448,6 +487,7 @@ export default function App() {
           >
             {viewMode === '2D' && (
               <SimulationCanvas2D
+                research={research} isPlaying={isPlaying} setIsPlaying={setIsPlaying}
                 key={`${cloudConfig.perspectiveMode ?? 'space_global'}:${cloudConfig.inspectionMode === 'split_3view' ? 'split' : 'canvas'}`}
                 earthConfig={earthConfig}
                 setEarthConfig={setEarthConfig}
@@ -477,6 +517,8 @@ export default function App() {
             {viewMode === '3D' && (
               <Suspense fallback={<ViewLoadingFallback />}>
                 <Magnetosphere3DView
+                  particleSystem={particleSystem} setLayerVisibility={setLayerVisibility}
+                  research={research} moonConfig={moonConfig} isPlaying={isPlaying} setIsPlaying={setIsPlaying} layerVisibility={layerVisibility}
                   earthConfig={earthConfig}
                   sources={sources}
                   solarWind={solarWind}
@@ -488,6 +530,7 @@ export default function App() {
             {viewMode === 'split' && (
               <div className="grid grid-cols-2 gap-2 h-full bg-[#0a0a0c]">
                 <SimulationCanvas2D
+                  research={research} isPlaying={isPlaying} setIsPlaying={setIsPlaying}
                   key={`split:${cloudConfig.perspectiveMode ?? 'space_global'}:${cloudConfig.inspectionMode === 'split_3view' ? 'split' : 'canvas'}`}
                   earthConfig={earthConfig}
                   setEarthConfig={setEarthConfig}
@@ -514,6 +557,8 @@ export default function App() {
                 />
                 <Suspense fallback={<ViewLoadingFallback />}>
                   <Magnetosphere3DView
+                    particleSystem={particleSystem} setLayerVisibility={setLayerVisibility}
+                    research={research} moonConfig={moonConfig} isPlaying={isPlaying} setIsPlaying={setIsPlaying} layerVisibility={layerVisibility}
                     earthConfig={earthConfig}
                     sources={sources}
                     solarWind={solarWind}
@@ -551,6 +596,7 @@ export default function App() {
         <aside aria-label="시뮬레이션 조건" className="lg:col-span-5 xl:col-span-4 flex min-h-0 flex-col gap-3.5 lg:sticky lg:top-[4.5rem]">
           {/* Controls Deck */}
           <PhysicsControls
+            research={research} setResearch={setResearch}
             earthConfig={earthConfig}
             setEarthConfig={setEarthConfig}
             sources={sources}
@@ -593,17 +639,19 @@ export default function App() {
         </div>
       )}
 
+      {knowledgeOpen && <KnowledgePage onClose={closeKnowledge} />}
       {/* Python Numerical Code Export Modal */}
       {isPythonModalOpen && (
         <Suspense fallback={null}>
           <NumericalVerificationModal
             isOpen={isPythonModalOpen}
-            onClose={() => setIsPythonModalOpen(false)}
+            onClose={closePython}
             earthConfig={earthConfig}
             sources={sources}
             solarWind={solarWind}
             cloudConfig={cloudConfig}
             moonConfig={moonConfig}
+            research={research}
           />
         </Suspense>
       )}

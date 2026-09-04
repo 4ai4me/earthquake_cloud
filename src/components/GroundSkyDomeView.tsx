@@ -1,3 +1,4 @@
+import { needsLogOnly } from '../physics/fieldModel';
 import React, { useRef, useEffect, useState, useMemo } from 'react';
 import {
   AtmosphericCloudConfig,
@@ -26,6 +27,7 @@ import {
 
 interface GroundSkyDomeViewProps {
   earthConfig: EarthDipoleConfig;
+  isPlaying?: boolean;
   sources: ExternalMagneticSource[];
   solarWind: SolarWindConfig;
   cloudConfig: AtmosphericCloudConfig;
@@ -34,6 +36,7 @@ interface GroundSkyDomeViewProps {
 
 export function GroundSkyDomeView({
   earthConfig,
+  isPlaying = true,
   sources,
   solarWind,
   cloudConfig,
@@ -54,6 +57,7 @@ export function GroundSkyDomeView({
   const [resolution, setResolution] = useState<'standard' | 'high'>('high');
 
   // Animation phase
+  const lastRasterRef = useRef(0);
   const phaseRef = useRef<number>(0);
 
   // Observer presets
@@ -104,9 +108,11 @@ export function GroundSkyDomeView({
     let lastTime = performance.now();
 
     const render = (time: number) => {
+      if(document.hidden || time-lastRasterRef.current<250){ animFrameRef.current=requestAnimationFrame(render); return; }
+      lastRasterRef.current=time;
       const dt = (time - lastTime) / 1000;
       lastTime = time;
-      phaseRef.current += dt * 1.5;
+      if(isPlaying) phaseRef.current += Math.min(0.3,dt);
 
       const canvas = canvasRef.current;
       if (!canvas) return;
@@ -119,6 +125,10 @@ export function GroundSkyDomeView({
       const centerY = height / 2;
       const domeRadius = Math.min(centerX, centerY) * 0.88;
 
+      if(needsLogOnly({earth:earthConfig,sources,solar:solarWind})){
+        ctx.fillStyle='#050508';ctx.fillRect(0,0,width,height);ctx.fillStyle='#fcd34d';ctx.fillText('극한 입력: 구름 정량 진단 중단',20,40);
+        animFrameRef.current=requestAnimationFrame(render);return;
+      }
       // 1. Deep Celestial Space / Night Sky Background
       ctx.fillStyle = '#050508';
       ctx.fillRect(0, 0, width, height);
@@ -145,7 +155,7 @@ export function GroundSkyDomeView({
       ctx.fillRect(0, 0, width, height);
 
       // 2. Render Sky Dome Altocumulus Wave Cloud Field (High-Res sampling)
-      const step = resolution === 'high' ? 4 : 6;
+      const step = Math.max(resolution === 'high' ? 4 : 6,Math.ceil(Math.sqrt(width*height/4000)));
       const currentPhase = phaseRef.current;
 
       for (let py = -domeRadius; py <= domeRadius; py += step) {
@@ -161,7 +171,7 @@ export function GroundSkyDomeView({
               v,
               earthConfig,
               observerAngle,
-              8.0,
+              cloudConfig.cloudAltitudeKm ?? 12,
               cloudConfig.groundObserver?.fovDeg ?? 140
             );
 
@@ -212,7 +222,7 @@ export function GroundSkyDomeView({
                 v,
                 earthConfig,
                 observerAngle,
-                8.0,
+                cloudConfig.cloudAltitudeKm ?? 12,
                 cloudConfig.groundObserver?.fovDeg ?? 140
               );
 
@@ -325,6 +335,7 @@ export function GroundSkyDomeView({
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
     };
   }, [
+    isPlaying,
     earthConfig,
     sources,
     solarWind,

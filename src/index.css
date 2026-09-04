@@ -23,3 +23,5 @@
     background: #2e2e3e;
   }
 }
+
+@keyframes core-circulation { to { transform: rotate(360deg); } }

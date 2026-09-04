@@ -1,4 +1,4 @@
-export type PoleType = 'monopole_n' | 'monopole_s' | 'dipole' | 'comet';
+export type PoleType = 'monopole_n' | 'monopole_s' | 'dipole' | 'comet' | 'uniform';
 
 export interface ExternalMagneticSource {
   id: string;
@@ -8,9 +8,12 @@ export interface ExternalMagneticSource {
   y: number;
   z?: number; // for 3D
   strength: number; // magnetic charge, moment magnitude, or comet gas activity
+  fieldNt?: string; // schema v2: nT at 1 R_E equator (dipole), radial 1 R_E (monopole), or uniform field
   angle?: number; // orientation angle for dipoles (degrees)
   active: boolean;
   orbiting?: boolean;
+  rotating?: boolean;
+  rotationSpeedDegS?: number; // signed axial rotation rate, independent of positional orbit
   orbitRadius?: number;
   orbitSpeed?: number;
   orbitPhase?: number;
@@ -27,6 +30,8 @@ export interface MoonConfig {
   phaseAngleDeg: number; // orbital position angle (0 to 360 deg)
   radius: number; // physical radius ~0.26 (relative to Earth 0.95, ~27% of R_E)
   remanentMoment: number; // crustal remanent magnetic dipole moment (~0.12)
+  hypothesisDipoleEnabled?: boolean; // explicit legacy whole-Moon dipole hypothesis, OFF by default
+  daysPerSecond?: number; // shared physical clock; synchronous lunar rotation follows phase
   remanentAngle: number; // swirl magnetic orientation angle (deg)
   tidalStressWeight: number; // solid Earth tidal gravitational stress coupling (~0.25)
   wakeCavityStrength: number; // solar wind downstream diamagnetic wake attenuation (~0.7)
@@ -54,7 +59,7 @@ export interface SolarWindConfig {
   density: number; // particle density
   speedKmS?: number; // measured/assumed bulk speed used for dynamic-pressure calculation
   densityCm3?: number; // measured/assumed proton density used for dynamic-pressure calculation
-  fieldVisualizationGain?: number; // explicit display gain applied to nT-scale IMF vectors
+  fieldVisualizationGain?: number; // legacy only; shared field ignores this amplification
 }
 
 export type InspectionViewMode = 'none' | 'cloud_density' | 'hotspot_mask' | 'cloud_vector_overlay' | 'split_3view';
@@ -130,6 +135,9 @@ export interface CernCloudAerosolConfig {
 }
 
 export interface AtmosphericCloudConfig {
+  cloudAltitudeKm?: number; // prescribed near-tropopause layer, not a calculated cloud-forming altitude
+  cloudLayerHalfWidthKm?: number;
+  altitudeDisplayGain?: number; // visualization only, shared by 2D and 3D
   enabled: boolean;
   particleCount: number; // 200 to 2000
   polarizationSusceptibility: number; // how strongly clouds align to B-field
@@ -261,7 +269,7 @@ export const DEFAULT_EARTH_DIPOLE: EarthDipoleConfig = {
   y: 0,
   moment: 1.0,
   tiltAngle: 11.5,
-  radius: 0.95,
+  radius: 1,
   reversed: false,
 };
 
@@ -274,27 +282,32 @@ export const DEFAULT_SOLAR_WIND: SolarWindConfig = {
   density: 1.0,
   speedKmS: 400,
   densityCm3: 5,
-  fieldVisualizationGain: 1000,
+  fieldVisualizationGain: 1,
 };
 
 export const DEFAULT_MOON_CONFIG: MoonConfig = {
   enabled: true,
-  orbitRadius: 3.5,
+  orbitRadius: 60.3,
   physicalDistanceEarthRadii: 60.3,
   orbitPeriodDays: 27.32,
   phaseAngleDeg: 45,
   radius: 0.26,
-  remanentMoment: 0.08,
+  remanentMoment: 0,
+  hypothesisDipoleEnabled: false,
+  daysPerSecond: 0.5,
   remanentAngle: 15,
   tidalStressWeight: 1.0,
   wakeCavityStrength: 0.7,
   showOrbit: true,
-  showTidalBulge: true,
+  showTidalBulge: false,
   autoOrbit: true,
   orbitSpeed: 0.3,
 };
 
 export const DEFAULT_CLOUD_CONFIG: AtmosphericCloudConfig = {
+  cloudAltitudeKm: 12,
+  cloudLayerHalfWidthKm: 1.5,
+  altitudeDisplayGain: 1,
   enabled: true,
   particleCount: 500,
   polarizationSusceptibility: 1.2,

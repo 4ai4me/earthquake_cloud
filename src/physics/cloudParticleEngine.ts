@@ -1,6 +1,8 @@
-import { AtmosphericCloudConfig, EarthDipoleConfig, ExternalMagneticSource, SolarWindConfig } from '../types';
-import { computeTotalMagneticField, computeFieldGradient, computeWaveCloudDensity } from './magneticEngine';
+import { AtmosphericCloudConfig, EarthDipoleConfig, ExternalMagneticSource, SolarWindConfig, DEFAULT_CLOUD_CONFIG, DEFAULT_EARTH_DIPOLE } from '../types';
+import { computeTotalMagneticField, computeFieldGradient, computeWaveCloudDensity, computeNaturalWeatherCloudDensity } from './magneticEngine';
 import { computeAerosolCloudBaselineMultiplier } from './cernCloudAerosolEngine';
+
+import { cloudLayerBounds, confineCloudParticle } from './atmosphereGeometry';
 
 export interface CloudParticle {
   id: number;
@@ -23,6 +25,9 @@ export interface CloudParticle {
 }
 
 export class CloudParticleSystem {
+  cloudBands: Array<{ x:number; y:number; baseline:number; hypothesis:number }> = [];
+  private earth = DEFAULT_EARTH_DIPOLE;
+  private cloud = DEFAULT_CLOUD_CONFIG;
   particles: CloudParticle[] = [];
   nextId: number = 0;
   globalAlignmentOrder: number = 0;
@@ -43,9 +48,10 @@ export class CloudParticleSystem {
   createRandomParticle(initial: boolean = false): CloudParticle {
     // Spawn in atmosphere zone around Earth or upstream
     const angle = Math.random() * Math.PI * 2;
-    const r = 0.85 + Math.random() * 3.5; // schematic display shell; not a true atmospheric altitude scale
-    const x = Math.cos(angle) * r;
-    const y = Math.sin(angle) * r;
+    const bounds = cloudLayerBounds(this.earth,this.cloud);
+    const r = bounds.min + Math.random()*(bounds.max-bounds.min);
+    const x = this.earth.x+Math.cos(angle)*r;
+    const y = this.earth.y+Math.sin(angle)*r;
 
     return {
       id: this.nextId++,
@@ -76,6 +82,7 @@ export class CloudParticleSystem {
     dt: number = 0.016,
     timePhase: number = 0
   ) {
+    this.earth=earthConfig; this.cloud=config;
     if (!config.enabled) return;
 
     // Adjust particle count dynamically
@@ -91,12 +98,20 @@ export class CloudParticleSystem {
     let totalAlignmentScore = 0;
     let hotspotCount = 0;
     let maxI = 0;
-    const bounds = { minX: -5.5, maxX: 5.5, minY: -3.5, maxY: 3.5 };
+    const layer = cloudLayerBounds(earthConfig,config);
     const aerosolBaselineMultiplier = computeAerosolCloudBaselineMultiplier(config.aerosolExperiment);
 
+    this.cloudBands=Array.from({length:240},(_,index)=>{
+      const angle=index/240*Math.PI*2, r=(layer.min+layer.max)/2;
+      const x=earthConfig.x+r*Math.cos(angle),y=earthConfig.y+r*Math.sin(angle);
+      const wave=computeWaveCloudDensity(x,y,earthConfig,sources,solarWind,config,timePhase);
+      return { x,y,baseline:computeNaturalWeatherCloudDensity(x,y,config.weatherData,timePhase,aerosolBaselineMultiplier),
+        hypothesis:config.showWaveClouds ? wave.density : 0 };
+    });
     for (let i = 0; i < this.particles.length; i++) {
       const p = this.particles[i];
-      const stableDt = Math.max(0, Math.min(0.05, dt));
+      confineCloudParticle(p,earthConfig,config);
+      const stableDt = Math.max(0, Math.min(0.2, dt));
       p.life += stableDt * 60;
 
       // Fade in and out
@@ -109,7 +124,7 @@ export class CloudParticleSystem {
       }
 
       // Check lifecycle respawn
-      if (p.life >= p.maxLife || p.x < bounds.minX || p.x > bounds.maxX || p.y < bounds.minY || p.y > bounds.maxY) {
+      if (p.life >= p.maxLife || !Number.isFinite(p.x) || !Number.isFinite(p.y)) {
         this.particles[i] = this.createRandomParticle();
         continue;
       }
@@ -152,7 +167,7 @@ export class CloudParticleSystem {
 
         // Overdamped Stokes response: the carrier-air velocity is the baseline.
         // 300 simulated seconds per display second keeps meteorological motion visible.
-        const windScale = 300 / 100_000;
+        const windScale = 300 / 6_371_000; // m/s to R_E/s; explicit atmospheric animation scale
         const windVx = (config.weatherData?.windU ?? 0) * windScale;
         const windVy = (config.weatherData?.windV ?? 0) * windScale;
 
@@ -200,16 +215,8 @@ export class CloudParticleSystem {
       p.x += p.vx * stableDt;
       p.y += p.vy * stableDt;
 
-      // Prevent sinking deep inside Earth core
-      const distToEarth = Math.hypot(p.x - earthConfig.x, p.y - earthConfig.y);
-      if (distToEarth < earthConfig.radius * 0.9) {
-        // Push outward to troposphere
-        const pushAngle = Math.atan2(p.y - earthConfig.y, p.x - earthConfig.x);
-        p.x = earthConfig.x + Math.cos(pushAngle) * earthConfig.radius * 0.95;
-        p.y = earthConfig.y + Math.sin(pushAngle) * earthConfig.radius * 0.95;
-        p.vx *= -0.5;
-        p.vy *= -0.5;
-      }
+      // Prescribed near-tropopause layer; confinement is a boundary condition, not an inferred force.
+      confineCloudParticle(p,earthConfig,config);
     }
 
     // Global nematic order parameter (-1 to +1)

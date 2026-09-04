@@ -1,3 +1,4 @@
+import { needsLogOnly } from '../physics/fieldModel';
 import React, { useRef, useEffect, useState, useMemo } from 'react';
 import {
   AtmosphericCloudConfig,
@@ -29,6 +30,7 @@ import {
 
 interface CloudInspectionSplitViewProps {
   earthConfig: EarthDipoleConfig;
+  isPlaying?: boolean;
   sources: ExternalMagneticSource[];
   solarWind: SolarWindConfig;
   cloudConfig: AtmosphericCloudConfig;
@@ -37,6 +39,7 @@ interface CloudInspectionSplitViewProps {
 
 export function CloudInspectionSplitView({
   earthConfig,
+  isPlaying = true,
   sources,
   solarWind,
   cloudConfig,
@@ -69,6 +72,7 @@ export function CloudInspectionSplitView({
   const [resolution, setResolution] = useState<'normal' | 'high'>('high');
 
   // Animation phase
+  const lastRasterRef = useRef(0);
   const phaseRef = useRef<number>(0);
 
   useEffect(() => {
@@ -76,9 +80,11 @@ export function CloudInspectionSplitView({
     let lastTime = performance.now();
 
     const render = (time: number) => {
+      if(document.hidden || time-lastRasterRef.current<250){ animId=requestAnimationFrame(render); return; }
+      lastRasterRef.current=time;
       const dt = (time - lastTime) / 1000;
       lastTime = time;
-      phaseRef.current += dt * 1.2;
+      if(isPlaying) phaseRef.current += Math.min(0.3,dt);
       const animPhase = phaseRef.current;
 
       const c1 = canvas1Ref.current;
@@ -93,7 +99,7 @@ export function CloudInspectionSplitView({
 
       const w = c1.width;
       const h = c1.height;
-      const step = resolution === 'high' ? 4 : 6;
+      const step = Math.max(resolution === 'high' ? 4 : 6,Math.ceil(Math.sqrt(w*h/4000)));
 
       // Clear dark backgrounds
       [ctx1, ctx2, ctx3].forEach((ctx) => {
@@ -101,7 +107,11 @@ export function CloudInspectionSplitView({
         ctx.fillRect(0, 0, w, h);
       });
 
-      // World coordinate bounding box (-5 to 5, -3.8 to 3.8)
+      if(needsLogOnly({earth:earthConfig,sources,solar:solarWind})){
+        [ctx1,ctx2,ctx3].forEach(ctx=>{ctx.fillStyle='#fcd34d';ctx.fillText('극한 입력: 구름 정량 진단 중단',10,25);});
+        animId=requestAnimationFrame(render);return;
+      }
+      // Diagnostic field plane, not the physical placement of cloud particles.
       const minX = -5.0;
       const maxX = 5.0;
       const minY = -3.8;
@@ -240,7 +250,7 @@ export function CloudInspectionSplitView({
 
     animId = requestAnimationFrame(render);
     return () => cancelAnimationFrame(animId);
-  }, [earthConfig, sources, solarWind, cloudConfig, gamma, streamlineAlpha, resolution]);
+  }, [earthConfig, sources, solarWind, cloudConfig, gamma, streamlineAlpha, resolution,isPlaying]);
 
   return (
     <div ref={containerRef} className="w-full h-full flex flex-col bg-[#07070a] rounded-lg overflow-hidden border border-[#1e1e24] text-slate-200">

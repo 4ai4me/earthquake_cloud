@@ -95,7 +95,7 @@ export const MathFormulaCard: React.FC = () => {
           <div className="bg-[#14141b] p-2 rounded border border-[#1e1e24]">
             <div className="font-medium text-slate-200 text-xs mb-0.5 flex items-center gap-1.5 font-mono">
               <span className="w-1.5 h-1.5 rounded-full bg-sky-400" />
-              4) 국소 정렬 패턴 (양떼구름 / Altocumulus Wave Cloud) 모델링
+              4) 반드시 가설: 지정된 주기적 구름 패턴 (자발적 생성 해 아님)
             </div>
             <div className="overflow-x-auto py-0.5 text-center font-mono text-sky-200 text-[11px] space-y-1">
               <LatexRenderer math="s=\frac{|\mathbf B_E\times\mathbf B_X|}{|\mathbf B_E||\mathbf B_X|},\quad q=\frac{|\mathbf B_X|}{|\mathbf B_E|+|\mathbf B_X|},\quad g=\tanh\left(\frac{L|\nabla B|}{B}\right)" displayMode />

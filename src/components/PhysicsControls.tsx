@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import { ResearchConfig, needsLogOnly } from '../physics/fieldModel';
+import { ResearchControls, ExternalSourcesControl, NumericInput } from './ResearchControls';
 import {
   AtmosphericCloudConfig,
   EarthDipoleConfig,
@@ -46,6 +48,8 @@ import {
 } from 'lucide-react';
 
 interface PhysicsControlsProps {
+  research: ResearchConfig;
+  setResearch: React.Dispatch<React.SetStateAction<ResearchConfig>>;
   earthConfig: EarthDipoleConfig;
   setEarthConfig: React.Dispatch<React.SetStateAction<EarthDipoleConfig>>;
   sources: ExternalMagneticSource[];
@@ -67,6 +71,7 @@ interface PhysicsControlsProps {
 }
 
 export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
+  research, setResearch,
   earthConfig,
   setEarthConfig,
   sources,
@@ -86,50 +91,12 @@ export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
   activeTab,
   setActiveTab,
 }) => {
-  const [newSourceType, setNewSourceType] = useState<PoleType>('monopole_n');
-  const [newSourceStrength, setNewSourceStrength] = useState<number>(2.0);
-  const [newCometActivity, setNewCometActivity] = useState<number>(2.5);
-  const [newCometTailLen, setNewCometTailLen] = useState<number>(3.2);
   const [, setStressModelRevision] = useState<number>(0);
   const referenceWaveState = computeWaveCloudDensity(
-    earthConfig.x - earthConfig.radius * 1.5,
-    earthConfig.y,
-    earthConfig,
-    sources,
-    solarWind,
-    cloudConfig,
-    0
+    earthConfig.x - earthConfig.radius * 1.5, earthConfig.y, earthConfig,
+    needsLogOnly({ earth: earthConfig, sources, solar: solarWind }) ? [] : sources,
+    solarWind, cloudConfig, 0
   );
-
-  const handleAddSource = () => {
-    const id = `source-${Date.now()}`;
-    let name = '외부 N극';
-    if (newSourceType === 'monopole_s') name = '외부 S극';
-    else if (newSourceType === 'dipole') name = '외부 쌍극자';
-    else if (newSourceType === 'comet') name = '접근 혜성 (Comet C/2026)';
-
-    const newSource: ExternalMagneticSource = {
-      id,
-      name,
-      type: newSourceType,
-      x: newSourceType === 'comet' ? -3.2 : 2.2 + (Math.random() - 0.5) * 1.5,
-      y: (Math.random() - 0.5) * 2.0,
-      strength: newSourceStrength,
-      angle: 0,
-      active: true,
-      orbiting: newSourceType === 'comet',
-      orbitRadius: newSourceType === 'comet' ? 3.4 : 2.8,
-      orbitSpeed: newSourceType === 'comet' ? 0.45 : 0.8,
-      orbitPhase: Math.random() * Math.PI * 2,
-      cometGasActivity: newCometActivity,
-      cometTailLength: newCometTailLen,
-    };
-    setSources((prev) => [...prev, newSource]);
-  };
-
-  const handleRemoveSource = (id: string) => {
-    setSources((prev) => prev.filter((s) => s.id !== id));
-  };
 
   const handleTriggerCME = () => {
     setSolarWind((prev) => ({
@@ -460,6 +427,7 @@ export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
         {/* EARTH DIPOLE TAB */}
         {activeTab === 'earth' && (
           <div className="space-y-3">
+            <ResearchControls config={research} setConfig={setResearch} />
             {/* Explanatory Info Card */}
             <div className="p-2.5 bg-gradient-to-br from-cyan-950/30 to-[#12121a] rounded-md border border-cyan-500/30 space-y-1.5">
               <div className="flex items-center justify-between text-cyan-300 font-semibold text-xs">
@@ -546,402 +514,23 @@ export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
         {/* MOON SATELLITE TAB */}
         {activeTab === 'moon' && (
           <div className="space-y-3">
-            {/* Explanatory Info Card */}
-            <div className="p-2.5 bg-gradient-to-br from-slate-900/50 via-[#14141d] to-sky-950/30 rounded-md border border-slate-500/30 space-y-1.5">
-              <div className="flex items-center justify-between text-slate-200 font-semibold text-xs">
-                <span className="flex items-center gap-1.5">
-                  <Moon className="w-3.5 h-3.5 text-slate-300" />
-                  지구 위성 "달(Moon)" 물리적 속성 & 영향
-                </span>
-                <button
-                  id="btn-reset-moon-normal"
-                  onClick={handleResetMoonNormal}
-                  className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 rounded text-[10px] font-mono transition-colors flex items-center gap-1"
-                >
-                  <RotateCcw className="w-2.5 h-2.5" />
-                  달 기본값 복원
-                </button>
-              </div>
-              <p className="text-[10px] text-slate-300 leading-relaxed">
-                달의 실제 평균 중심 거리는 약 384,400 km, 즉 약 60.3 R_E입니다. 화면의 3.5 단위 궤도는 가시성을 위한 축척입니다.
-                <br />
-                • <strong>고체 지구 조석력(기조력)</strong>: 달의 중력 구배로 인해 지구 지각에 주기적인 인장/압축 응력(Δσ_tide)이 발생하여 지진 단층 파열에 기여합니다.
-                <br />
-                • <strong>국소 지각 잔류자기장</strong>: 달 지각 암석의 잔류 자화(Remanent Field) 및 태양풍 차폐 플라즈마 후류(Plasma Wake)가 형성됩니다.
-              </p>
-            </div>
-
-            <div className="flex items-center justify-between p-2.5 bg-[#14141b] rounded-md border border-[#1e1e24]">
-              <div>
-                <div className="font-medium text-slate-200 text-xs">달(Moon) 시뮬레이션 활성화</div>
-                <div className="text-[10px] text-slate-400">달 천체, 공전 궤도, 기조력 타원체, 플라즈마 후류 연동</div>
-              </div>
-              <button
-                id="btn-toggle-moon"
-                onClick={() => setMoonConfig && setMoonConfig((prev) => ({ ...prev, enabled: !prev.enabled }))}
-                className={`px-2.5 py-1 rounded text-xs font-mono font-medium transition-colors ${
-                  moonConfig.enabled
-                    ? 'bg-sky-600/30 text-sky-200 border border-sky-500/40'
-                    : 'bg-[#1a1a24] text-slate-400 border border-[#2a2a38] hover:bg-[#222230]'
-                }`}
-              >
-                {moonConfig.enabled ? 'ON (활성화)' : 'OFF (비활성)'}
-              </button>
-            </div>
-
-            {moonConfig.enabled && (
-              <>
-                <div className="p-2.5 bg-[#14141b] rounded-md border border-[#1e1e24]">
-                  <div className="flex justify-between text-slate-300 mb-1">
-                    <span>달 궤도 위상각 (Orbital Phase)</span>
-                    <span className="font-mono text-sky-300 font-bold">
-                      {Math.round(moonConfig.phaseAngleDeg)}° (
-                      {Math.abs(moonConfig.phaseAngleDeg - 0) < 20
-                        ? '신월/New'
-                        : Math.abs(moonConfig.phaseAngleDeg - 90) < 20
-                        ? '상현/1st Qtr'
-                        : Math.abs(moonConfig.phaseAngleDeg - 180) < 20
-                        ? '보름달/Full'
-                        : Math.abs(moonConfig.phaseAngleDeg - 270) < 20
-                        ? '하현/3rd Qtr'
-                        : '중간 위상'}
-                      )
-                    </span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="360"
-                    step="1"
-                    value={moonConfig.phaseAngleDeg}
-                    onChange={(e) =>
-                      setMoonConfig &&
-                      setMoonConfig((prev) => ({ ...prev, phaseAngleDeg: parseFloat(e.target.value) }))
-                    }
-                    className="w-full accent-sky-400 cursor-pointer h-1.5 bg-[#09090c] rounded"
-                  />
-                  <div className="flex justify-between text-[9px] text-slate-400 mt-1 font-mono">
-                    <span>0° (신월/태양 방향)</span>
-                    <span>90° (상현)</span>
-                    <span>180° (보름달/자기권꼬리)</span>
-                    <span>270° (하현)</span>
-                  </div>
-                </div>
-
-                <div className="p-2.5 bg-[#14141b] rounded-md border border-[#1e1e24]">
-                  <div className="flex justify-between text-slate-300 mb-1">
-                    <span>화면 표시 궤도 반경</span>
-                    <span className="font-mono text-sky-300 font-bold">
-                      {(moonConfig.orbitRadius ?? 3.5).toFixed(1)} world units
-                    </span>
-                  </div>
-                  <input
-                    type="range"
-                    min="1.8"
-                    max="6.0"
-                    step="0.1"
-                    value={moonConfig.orbitRadius ?? 3.5}
-                    onChange={(e) =>
-                      setMoonConfig &&
-                      setMoonConfig((prev) => ({ ...prev, orbitRadius: parseFloat(e.target.value) }))
-                    }
-                    className="w-full accent-sky-400 cursor-pointer h-1.5 bg-[#09090c] rounded"
-                  />
-                  <div className="flex justify-between text-[9px] text-slate-400 mt-1 font-mono">
-                    <span>1.8 (화면상 근거리)</span>
-                    <span className="text-sky-300 font-bold">3.5 (기본 표시 축척)</span>
-                    <span>6.0 (화면상 원거리)</span>
-                  </div>
-                </div>
-
-                <div className="p-2.5 bg-[#14141b] rounded-md border border-[#1e1e24]">
-                  <div className="flex justify-between text-slate-300 mb-1">
-                    <span>조석 계산용 실제 거리</span>
-                    <span className="font-mono text-sky-300 font-bold">
-                      {(moonConfig.physicalDistanceEarthRadii ?? 60.3).toFixed(1)} R_E (약{' '}
-                      {Math.round((moonConfig.physicalDistanceEarthRadii ?? 60.3) * EARTH_RADIUS_KM).toLocaleString()} km)
-                    </span>
-                  </div>
-                  <input
-                    type="range"
-                    min="50"
-                    max="70"
-                    step="0.1"
-                    value={moonConfig.physicalDistanceEarthRadii ?? 60.3}
-                    onChange={(e) =>
-                      setMoonConfig &&
-                      setMoonConfig((prev) => ({ ...prev, physicalDistanceEarthRadii: parseFloat(e.target.value) }))
-                    }
-                    className="w-full accent-sky-400 cursor-pointer h-1.5 bg-[#09090c] rounded"
-                  />
-                  <div className="text-[10px] text-slate-400 mt-1">조석 항은 이 거리의 역세제곱에 비례하며 화면 궤도와 독립적으로 계산됩니다.</div>
-                </div>
-
-                <div className="p-2.5 bg-[#14141b] rounded-md border border-[#1e1e24]">
-                  <div className="flex justify-between text-slate-300 mb-1">
-                    <span>고체 지구 조석 응력 보정계수</span>
-                    <span className="font-mono text-sky-300 font-bold">
-                      {(moonConfig.tidalStressWeight ?? 1).toFixed(2)}
-                    </span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0.0"
-                    max="1.0"
-                    step="0.05"
-                    value={moonConfig.tidalStressWeight ?? 1}
-                    onChange={(e) =>
-                      setMoonConfig &&
-                      setMoonConfig((prev) => ({ ...prev, tidalStressWeight: parseFloat(e.target.value) }))
-                    }
-                    className="w-full accent-sky-400 cursor-pointer h-1.5 bg-[#09090c] rounded"
-                  />
-                  <div className="text-[10px] text-slate-400 mt-1">
-                    최대 약 4 kPa 범위의 가역적 조석 섭동에 곱하는 보정계수입니다. 조석 응력은 판구조 응력처럼 누적되지 않습니다.
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="p-2 bg-[#14141b] rounded border border-[#1e1e24]">
-                    <div className="flex justify-between text-slate-300 text-[11px] mb-1">
-                      <span>달 잔류 자기장 (m_M)</span>
-                      <span className="font-mono text-sky-300 font-bold">
-                        {(moonConfig.remanentMoment ?? 0.08).toFixed(2)}
-                      </span>
-                    </div>
-                    <input
-                      type="range"
-                      min="0.0"
-                      max="0.8"
-                      step="0.02"
-                      value={moonConfig.remanentMoment ?? 0.08}
-                      onChange={(e) =>
-                        setMoonConfig &&
-                        setMoonConfig((prev) => ({ ...prev, remanentMoment: parseFloat(e.target.value) }))
-                      }
-                      className="w-full accent-sky-400 h-1.5 bg-[#09090c] rounded"
-                    />
-                  </div>
-
-                  <div className="p-2 bg-[#14141b] rounded border border-[#1e1e24] flex flex-col justify-between">
-                    <div className="text-[11px] text-slate-300">달 자동 공전 (Auto-Orbit)</div>
-                    <button
-                      onClick={() =>
-                        setMoonConfig &&
-                        setMoonConfig((prev) => ({ ...prev, autoOrbit: !prev.autoOrbit }))
-                      }
-                      className={`w-full py-1 rounded text-xs font-mono font-medium transition-colors ${
-                        moonConfig.autoOrbit
-                          ? 'bg-emerald-950/60 text-emerald-300 border border-emerald-500/40'
-                          : 'bg-[#0f0f15] text-slate-400 border border-[#1e1e24]'
-                      }`}
-                    >
-                      {moonConfig.autoOrbit ? '공전 진행 중' : '공전 정지'}
-                    </button>
-                  </div>
-                </div>
-              </>
-            )}
+            <h3 className="text-cyan-200 font-semibold">달 · 동일 거리/시간을 2D·3D에 적용</h3>
+            <p>현재 달에는 확인된 전역 쌍극자 자기장이 없습니다. 국소 지각 자기장·해양/전리층 조석 자기 신호는 이 모델에서 계산하지 않습니다.</p>
+            <label className="flex gap-2"><input type="checkbox" checked={moonConfig.enabled} onChange={e => setMoonConfig?.(p => ({ ...p, enabled:e.target.checked }))} />달 활성</label>
+            <NumericInput label="지구 중심–달 중심 거리 (R_E)" value={moonConfig.physicalDistanceEarthRadii ?? 60.3} min={1.3} onChange={distance => setMoonConfig?.(p => ({ ...p, physicalDistanceEarthRadii:distance, orbitRadius:distance }))} />
+            <NumericInput label="달 위상 (°)" value={moonConfig.phaseAngleDeg} onChange={phaseAngleDeg => setMoonConfig?.(p => ({ ...p, phaseAngleDeg:((phaseAngleDeg%360)+360)%360 }))} />
+            <NumericInput label="시간 배율 (실제 일 / 화면 초)" value={moonConfig.daysPerSecond ?? 0.5} min={0} onChange={daysPerSecond => setMoonConfig?.(p => ({ ...p, daysPerSecond }))} />
+            <p>공전 주기 {moonConfig.orbitPeriodDays}일, 동주기 자전. 달이 화면 밖이면 '달 궤도 맞춤'을 사용하세요. 크기/거리를 임의로 압축하지 않습니다.</p>
+            <button onClick={() => setMoonConfig?.(p => ({ ...p, autoOrbit:!p.autoOrbit }))} className="border border-cyan-800 rounded p-2">{moonConfig.autoOrbit ? '공전 진행 중' : '공전 정지'}</button>
+            <label className="flex gap-2"><input type="checkbox" checked={moonConfig.showOrbit} onChange={e => setMoonConfig?.(p => ({ ...p, showOrbit:e.target.checked }))} />공전 궤도 표시</label>
+            <NumericInput label="조석 응력 보정 (0–1, 가역적 최대 4 kPa)" value={moonConfig.tidalStressWeight} min={0} max={1} onChange={tidalStressWeight => setMoonConfig?.(p => ({ ...p, tidalStressWeight }))} />
+            <label className="flex gap-2 text-amber-300"><input type="checkbox" checked={!!moonConfig.hypothesisDipoleEnabled} onChange={e => setMoonConfig?.(p => ({ ...p, hypothesisDipoleEnabled:e.target.checked }))} />반드시 가설: 달 전역 쌍극자 (기본 OFF)</label>
+            {moonConfig.hypothesisDipoleEnabled && <NumericInput label="가설 달 모멘트 (M_E, 관측값 아님)" value={moonConfig.remanentMoment} min={0} onChange={remanentMoment => setMoonConfig?.(p => ({ ...p, remanentMoment }))} />}
+            <button onClick={handleResetMoonNormal} className="border rounded p-2">달 기본값 복원</button>
           </div>
         )}
 
-        {/* EXTERNAL SOURCES & COMET TAB */}
-        {activeTab === 'sources' && (
-          <div className="space-y-3">
-            {/* Explanatory Info Card */}
-            <div className="p-2.5 bg-gradient-to-br from-purple-950/30 to-[#14141d] rounded-md border border-purple-500/30 space-y-1.5">
-              <div className="flex items-center justify-between text-purple-300 font-semibold text-xs">
-                <span className="flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5 text-purple-400" />
-                  외부 자극원 & 접근 혜성(Comet) 물리적 의미
-                </span>
-                <button
-                  id="btn-reset-sources-normal"
-                  onClick={handleResetSourcesNormal}
-                  className="px-2 py-0.5 bg-purple-950/60 hover:bg-purple-900/60 text-purple-300 border border-purple-500/40 rounded text-[10px] font-mono transition-colors flex items-center gap-1"
-                >
-                  <Trash2 className="w-2.5 h-2.5" />
-                  외부 자극원 전체 제거 (0개)
-                </button>
-              </div>
-              <p className="text-[10px] text-slate-300 leading-relaxed">
-                • <strong>합성 극 프록시/쌍극자</strong>: 외부장 경계조건을 탐색하기 위한 입력입니다. 단극 프록시는 실제 자기 단극자의 존재를 뜻하지 않습니다.
-                <br />
-                • <strong>접근 혜성(Comet)</strong>: 태양 복사열로 승화된 가스 코마가 광전리(Photoionization)되어 태양풍 자기장에 플라즈마를 부하(Mass-loading)시킵니다. 핵 주변 반자성 공동(Diamagnetic cavity)과 긴 이온 꼬리가 지구 자기권과 대기 파동운을 간섭합니다.
-              </p>
-            </div>
-
-            {/* Add New Source Tool */}
-            <div className="p-2.5 bg-[#14141b] rounded-md border border-[#1e1e24] space-y-2">
-              <div className="font-medium text-slate-200 text-xs">새로운 외부 자기원 / 혜성 추가</div>
-              <div className="grid grid-cols-4 gap-1.5">
-                <button
-                  onClick={() => setNewSourceType('monopole_n')}
-                  className={`py-1 text-[11px] font-mono rounded border font-medium ${
-                    newSourceType === 'monopole_n'
-                      ? 'bg-red-950/40 text-red-300 border-red-500/50'
-                      : 'bg-[#0f0f15] text-slate-400 border-[#1e1e24]'
-                  }`}
-                >
-                  합성 N극 프록시 (+q*)
-                </button>
-                <button
-                  onClick={() => setNewSourceType('monopole_s')}
-                  className={`py-1 text-[11px] font-mono rounded border font-medium ${
-                    newSourceType === 'monopole_s'
-                      ? 'bg-blue-950/40 text-blue-300 border-blue-500/50'
-                      : 'bg-[#0f0f15] text-slate-400 border-[#1e1e24]'
-                  }`}
-                >
-                  합성 S극 프록시 (-q*)
-                </button>
-                <button
-                  onClick={() => setNewSourceType('dipole')}
-                  className={`py-1 text-[11px] font-mono rounded border font-medium ${
-                    newSourceType === 'dipole'
-                      ? 'bg-purple-950/40 text-purple-300 border-purple-500/50'
-                      : 'bg-[#0f0f15] text-slate-400 border-[#1e1e24]'
-                  }`}
-                >
-                  쌍극자 (m_ext)
-                </button>
-                <button
-                  onClick={() => setNewSourceType('comet')}
-                  className={`py-1 text-[11px] font-mono rounded border font-medium ${
-                    newSourceType === 'comet'
-                      ? 'bg-sky-950/60 text-sky-300 border-sky-500/50 font-bold'
-                      : 'bg-[#0f0f15] text-slate-400 border-[#1e1e24]'
-                  }`}
-                >
-                  ☄️ 혜성 (Comet)
-                </button>
-              </div>
-
-              {newSourceType === 'comet' ? (
-                <div className="space-y-2 pt-1 border-t border-[#1e1e24]">
-                  <div className="flex items-center gap-2">
-                    <span className="text-slate-400 text-xs">승화 가스 방출율 (Activity):</span>
-                    <input
-                      type="range"
-                      min="1.0"
-                      max="6.0"
-                      step="0.2"
-                      value={newCometActivity}
-                      onChange={(e) => setNewCometActivity(parseFloat(e.target.value))}
-                      className="flex-1 accent-sky-400 h-1.5 bg-[#09090c] rounded"
-                    />
-                    <span className="font-mono text-sky-400 font-bold">{newCometActivity.toFixed(1)}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-slate-400 text-xs">이온 꼬리 길이 (Tail Length):</span>
-                    <input
-                      type="range"
-                      min="1.5"
-                      max="5.5"
-                      step="0.2"
-                      value={newCometTailLen}
-                      onChange={(e) => setNewCometTailLen(parseFloat(e.target.value))}
-                      className="flex-1 accent-sky-400 h-1.5 bg-[#09090c] rounded"
-                    />
-                    <span className="font-mono text-sky-400 font-bold">{newCometTailLen.toFixed(1)} R_E</span>
-                    <button
-                      id="btn-add-comet-source"
-                      onClick={handleAddSource}
-                      className="px-2.5 py-1 bg-sky-600 hover:bg-sky-500 text-white rounded flex items-center gap-1 font-medium transition-colors text-xs shadow-sm"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      혜성 투입
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex items-center gap-2 pt-1">
-                  <span className="text-slate-400 text-xs">자극 세기:</span>
-                  <input
-                    type="range"
-                    min="0.5"
-                    max="5.0"
-                    step="0.2"
-                    value={newSourceStrength}
-                    onChange={(e) => setNewSourceStrength(parseFloat(e.target.value))}
-                    className="flex-1 accent-cyan-400 h-1.5 bg-[#09090c] rounded"
-                  />
-                  <span className="font-mono text-cyan-400 font-bold">{newSourceStrength.toFixed(1)}</span>
-                  <button
-                    id="btn-add-source"
-                    onClick={handleAddSource}
-                    className="px-2.5 py-1 bg-cyan-600 hover:bg-cyan-500 text-white rounded flex items-center gap-1 font-medium transition-colors text-xs shadow-sm"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    추가
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* List of Active Sources */}
-            <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-              {sources.length === 0 ? (
-                <div className="text-slate-500 text-center py-3 bg-[#14141b] rounded border border-[#1e1e24] text-xs">
-                  현재 활성화된 외부 자극원/혜성이 없습니다.
-                </div>
-              ) : (
-                sources.map((s) => (
-                  <div
-                    key={s.id}
-                    className="flex items-center justify-between p-2 bg-[#14141b] rounded border border-[#1e1e24] text-xs"
-                  >
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={`w-2 h-2 rounded-full ${
-                          s.type === 'monopole_n'
-                            ? 'bg-red-500'
-                            : s.type === 'monopole_s'
-                            ? 'bg-blue-500'
-                            : s.type === 'comet'
-                            ? 'bg-sky-400 animate-pulse'
-                            : 'bg-purple-500'
-                        }`}
-                      />
-                      <div>
-                        <div className="font-medium text-slate-200 text-xs flex items-center gap-1">
-                          {s.type === 'comet' ? '☄️ ' : ''}
-                          {s.name}
-                        </div>
-                        <div className="text-[10px] text-slate-400 font-mono">
-                          좌표: ({s.x.toFixed(1)}, {s.y.toFixed(1)}) · 강도: {s.strength}q
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={() =>
-                          setSources((prev) =>
-                            prev.map((src) => (src.id === s.id ? { ...src, orbiting: !src.orbiting } : src))
-                          )
-                        }
-                        className={`px-2 py-0.5 rounded text-[10px] font-mono border ${
-                          s.orbiting
-                            ? 'bg-amber-950/40 text-amber-300 border-amber-500/40'
-                            : 'bg-[#0f0f15] text-slate-400 border-[#1e1e24]'
-                        }`}
-                      >
-                        {s.orbiting ? '공전 중' : '정적'}
-                      </button>
-                      <button
-                        onClick={() => handleRemoveSource(s.id)}
-                        className="p-1 text-slate-400 hover:text-red-400 hover:bg-[#1a1a24] rounded transition-colors"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        )}
+        {activeTab === 'sources' && <ExternalSourcesControl sources={sources} setSources={setSources} earth={earthConfig} />}
 
         {/* SOLAR WIND & IMF TAB */}
         {activeTab === 'solar' && (
@@ -1053,6 +642,14 @@ export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
         {/* CLOUD TAB */}
         {activeTab === 'cloud' && (
           <div className="space-y-3">
+            <section className="space-y-2 rounded border border-cyan-800 p-3">
+              <h3 className="font-semibold text-cyan-200">구름층 고도 · 2D/3D 공통</h3>
+              <p>대류권계면 부근의 지정층입니다. 양떼 모양 구름 모두가 이 고도에 있는 것은 아닙니다. 중층 고적운과 상층 권적운을 구분하세요.</p>
+              <NumericInput label="지표면 위 구름 중심 고도 (km)" value={cloudConfig.cloudAltitudeKm??12} min={1} max={20} onChange={cloudAltitudeKm=>setCloudConfig(p=>({...p,cloudAltitudeKm}))} />
+              <NumericInput label="구름층 반두께 (km)" value={cloudConfig.cloudLayerHalfWidthKm??1.5} min={0.1} max={3} onChange={cloudLayerHalfWidthKm=>setCloudConfig(p=>({...p,cloudLayerHalfWidthKm}))} />
+              <label className="block">고도 표시 배율<select className="w-full bg-slate-950 rounded p-2" value={cloudConfig.altitudeDisplayGain??1} onChange={e=>setCloudConfig(p=>({...p,altitudeDisplayGain:Number(e.target.value)}))}><option value={1}>×1 실제 축척</option><option value={30}>×30 고도 확대</option><option value={100}>×100 고도 확대</option></select></label>
+              <p className="text-amber-200">고도 확대는 화면에만 적용하며 물리적 거리/자기장/입자 계산을 바꾸지 않습니다. 지정층에 가둔 경계조건이며 응결 고도를 예측한 결과가 아닙니다.</p>
+            </section>
             {/* Explanatory Info Card */}
             <div className="p-2.5 bg-gradient-to-br from-cyan-950/30 to-[#14141d] rounded-md border border-cyan-500/30 space-y-1.5">
               <div className="flex items-center justify-between text-cyan-300 font-semibold text-xs">

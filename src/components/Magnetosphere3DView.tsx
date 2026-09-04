@@ -1,520 +1,223 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
-import { AtmosphericCloudConfig, EarthDipoleConfig, ExternalMagneticSource, SolarWindConfig } from '../types';
-import { RotateCw, Eye, Sparkles, Orbit, Compass, Sliders, Shield } from 'lucide-react';
-import { computeShueMagnetopauseRadius } from '../physics/physicsCalibration';
-import { computeExternalMagnetosphereDistortion3D } from '../physics/magneticEngine';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { AtmosphericCloudConfig, EarthDipoleConfig, ExternalMagneticSource, SolarWindConfig, MoonConfig, LayerVisibilityConfig } from '../types';
+import { FieldContext, ResearchConfig, needsLogOnly, distanceLabel, fieldOpacity, magnetopausePoint, moonPosition, weakBoundaryPoint } from '../physics/fieldModel';
+import { displayCloudPosition } from '../physics/atmosphereGeometry';
+import { useFieldGeometry } from './useFieldGeometry';
+import { VisualElementsGuidePanel } from './VisualElementsGuidePanel';
+import { CoreFlowInset, FieldReadout } from './FieldReadout';
+import { CloudParticleSystem } from '../physics/cloudParticleEngine';
 
 interface Magnetosphere3DViewProps {
-  earthConfig: EarthDipoleConfig;
-  sources: ExternalMagneticSource[];
-  solarWind: SolarWindConfig;
-  cloudConfig: AtmosphericCloudConfig;
+  earthConfig: EarthDipoleConfig; sources: ExternalMagneticSource[]; solarWind: SolarWindConfig;
+  cloudConfig: AtmosphericCloudConfig; moonConfig: MoonConfig; research: ResearchConfig;
+  isPlaying: boolean; setIsPlaying: React.Dispatch<React.SetStateAction<boolean>>;
+  setLayerVisibility: React.Dispatch<React.SetStateAction<LayerVisibilityConfig>>;
+  layerVisibility: LayerVisibilityConfig; particleSystem: CloudParticleSystem;
 }
-
-export const Magnetosphere3DView: React.FC<Magnetosphere3DViewProps> = ({
-  earthConfig,
-  sources,
-  solarWind,
-  cloudConfig,
-}) => {
-  const mountRef = useRef<HTMLDivElement | null>(null);
-  const [autoRotate, setAutoRotate] = useState<boolean>(true);
-  const [showBowShock, setShowBowShock] = useState<boolean>(true);
-  const [showFluxTubes, setShowFluxTubes] = useState<boolean>(true);
-  const [showCloudParticles, setShowCloudParticles] = useState<boolean>(true);
-
-  // Scene references for updates
-  const sceneRef = useRef<THREE.Scene | null>(null);
-  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
-  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
-  const fieldLinesGroupRef = useRef<THREE.Group | null>(null);
-  const particlesGroupRef = useRef<THREE.Points | null>(null);
-  const bowShockMeshRef = useRef<THREE.Mesh | null>(null);
-  const earthMeshRef = useRef<THREE.Group | null>(null);
-  const activeSources = sources.filter((source) => source.active);
-  const activeSourceStrength = activeSources.reduce((sum, source) => sum + Math.abs(source.strength), 0);
+function disposeGroup(group: THREE.Object3D) {
+  group.traverse(object => {
+    const mesh = object as THREE.Mesh;
+    mesh.geometry?.dispose();
+    const materials = Array.isArray(mesh.material) ? mesh.material : mesh.material ? [mesh.material] : [];
+    materials.forEach(material => { (material as THREE.SpriteMaterial).map?.dispose(); material.dispose(); });
+  });
+  group.clear();
+}
+function labelSprite(text: string) {
+  const canvas = document.createElement('canvas'); canvas.width=512; canvas.height=64;
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle='#cbd5e1'; ctx.font='22px monospace'; ctx.fillText(text, 4, 40);
+  const texture = new THREE.CanvasTexture(canvas);
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map:texture, transparent:true, depthTest:false }));
+  sprite.scale.set(6,0.75,1); return sprite;
+}
+export const Magnetosphere3DView: React.FC<Magnetosphere3DViewProps> = (props) => {
+  const { earthConfig, sources, solarWind, moonConfig, research, isPlaying, setIsPlaying, layerVisibility, particleSystem } = props;
+  const mountRef = useRef<HTMLDivElement>(null);
+  const [extent,setExtent] = useState(18);
+  const [autoRotate,setAutoRotate] = useState(false);
+  const showFlux=layerVisibility.streamlines, showBoundary=layerVisibility.solarWind;
+  const showParticles=layerVisibility.cloudParticles||layerVisibility.cloudBands||layerVisibility.waveClouds;
+  const [error,setError] = useState<string|null>(null);
+  const [probe,setProbe] = useState('');
+  const [fps,setFps] = useState(0);
+  const context = useMemo<FieldContext>(() => ({ earth:earthConfig, sources, solar:solarWind, moon:moonConfig }),[earthConfig,sources,solarWind,moonConfig]);
+  const field = useFieldGeometry({ context, extent, planar:false, density:24 });
+  const latest = useRef(props); latest.current=props;
+  const refs = useRef<{ scene:THREE.Scene; renderer:THREE.WebGLRenderer; camera:THREE.PerspectiveCamera; controls:OrbitControls;
+    earth:THREE.Group; moon:THREE.Mesh; sources:THREE.Group; boundaries:THREE.Group; lines:THREE.Group; cloud:THREE.Points; pulses:THREE.Points }|null>(null);
 
   useEffect(() => {
-    const mount = mountRef.current;
-    if (!mount) return;
-
-    const width = mount.clientWidth;
-    const height = mount.clientHeight;
-
-    // 1. Setup Scene, Camera, Renderer
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x08080b);
-    sceneRef.current = scene;
-
-    const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
-    camera.position.set(0, 5, 12);
-    cameraRef.current = camera;
-
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    const mount=mountRef.current; if(!mount) return;
+    let renderer:THREE.WebGLRenderer;
+    try { renderer = new THREE.WebGLRenderer({ antialias:true, alpha:false }); }
+    catch(cause) { console.error('3D renderer initialization failed',cause); setError('WebGL을 시작할 수 없습니다. 2D 화면을 사용하거나 하드웨어 가속을 확인하세요.'); return; }
+    renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));
     mount.appendChild(renderer.domElement);
-    rendererRef.current = renderer;
-
-    // 2. Lighting
-    const ambientLight = new THREE.AmbientLight(0x334155, 1.2);
-    scene.add(ambientLight);
-
-    const sunLight = new THREE.DirectionalLight(0xffffff, 2.5);
-    sunLight.position.set(-20, 5, 10);
-    scene.add(sunLight);
-
-    const backGlow = new THREE.PointLight(0x06b6d4, 1.5, 30);
-    backGlow.position.set(0, 0, 0);
-    scene.add(backGlow);
-
-    // 3. Earth Planetary Group
-    const earthGroup = new THREE.Group();
-    earthMeshRef.current = earthGroup;
-
-    // Earth Sphere
-    const earthGeo = new THREE.SphereGeometry(1.2, 36, 36);
-    const earthMat = new THREE.MeshStandardMaterial({
-      color: 0x0f172a,
-      roughness: 0.6,
-      metalness: 0.2,
-      emissive: 0x0369a1,
-      emissiveIntensity: 0.15,
-    });
-    const earthMesh = new THREE.Mesh(earthGeo, earthMat);
-    earthGroup.add(earthMesh);
-
-    // Earth Lat/Long Wireframe Grid
-    const gridGeo = new THREE.SphereGeometry(1.21, 18, 18);
-    const gridMat = new THREE.MeshBasicMaterial({
-      color: 0x38bdf8,
-      wireframe: true,
-      transparent: true,
-      opacity: 0.18,
-    });
-    const gridMesh = new THREE.Mesh(gridGeo, gridMat);
-    earthGroup.add(gridMesh);
-
-    // Atmosphere Glow Shell
-    const atmoGeo = new THREE.SphereGeometry(1.45, 32, 32);
-    const atmoMat = new THREE.MeshBasicMaterial({
-      color: 0x0ea5e9,
-      transparent: true,
-      opacity: 0.12,
-      side: THREE.BackSide,
-    });
-    const atmoMesh = new THREE.Mesh(atmoGeo, atmoMat);
-    earthGroup.add(atmoMesh);
-
-    // Magnetic Dipole Axis Cylinder
-    const axisGeo = new THREE.CylinderGeometry(0.04, 0.04, 3.2, 16);
-    const axisMat = new THREE.MeshBasicMaterial({ color: 0x94a3b8, transparent: true, opacity: 0.7 });
-    const axisMesh = new THREE.Mesh(axisGeo, axisMat);
-    earthGroup.add(axisMesh);
-
-    // Magnetic Poles (Red N, Blue S)
-    const poleGeo = new THREE.SphereGeometry(0.12, 16, 16);
-    const nPoleMat = new THREE.MeshBasicMaterial({ color: 0xef4444 });
-    const sPoleMat = new THREE.MeshBasicMaterial({ color: 0x3b82f6 });
-
-    const nPole = new THREE.Mesh(poleGeo, nPoleMat);
-    nPole.position.set(0, 1.5, 0);
-    earthGroup.add(nPole);
-
-    const sPole = new THREE.Mesh(poleGeo, sPoleMat);
-    sPole.position.set(0, -1.5, 0);
-    earthGroup.add(sPole);
-
-    scene.add(earthGroup);
-
-    // 4. Magnetosphere Bow Shock Shell (Paraboloid)
-    const bowShockGeo = new THREE.CylinderGeometry(0.1, 4.8, 6.0, 32, 1, true);
-    const bowShockMat = new THREE.MeshBasicMaterial({
-      color: 0xf59e0b,
-      transparent: true,
-      opacity: 0.15,
-      wireframe: true,
-      side: THREE.DoubleSide,
-    });
-    const bowShockMesh = new THREE.Mesh(bowShockGeo, bowShockMat);
-    bowShockMesh.rotation.z = Math.PI / 2;
-    bowShockMesh.position.set(-1.8, 0, 0);
-    bowShockMeshRef.current = bowShockMesh;
-    scene.add(bowShockMesh);
-
-    // 5. 3D Magnetic Field Lines Group
-    const fieldLinesGroup = new THREE.Group();
-    fieldLinesGroupRef.current = fieldLinesGroup;
-    scene.add(fieldLinesGroup);
-
-    // 6. 3D Atmospheric / Magnetosphere Particles (Clouds & Solar Ions)
-    const particleCount = 1200;
-    const particleGeo = new THREE.BufferGeometry();
-    const particlePositions = new Float32Array(particleCount * 3);
-    const particleColors = new Float32Array(particleCount * 3);
-
-    for (let i = 0; i < particleCount; i++) {
-      const theta = Math.random() * Math.PI * 2;
-      const phi = Math.acos(Math.random() * 2 - 1);
-      const r = 1.3 + Math.random() * 3.8;
-
-      const x = r * Math.sin(phi) * Math.cos(theta);
-      const y = r * Math.sin(phi) * Math.sin(theta);
-      const z = r * Math.cos(phi);
-
-      particlePositions[i * 3] = x;
-      particlePositions[i * 3 + 1] = y;
-      particlePositions[i * 3 + 2] = z;
-
-      // Color gradation (Cyan atmospheric vapor to golden solar wind)
-      const isSunward = x < -0.5;
-      particleColors[i * 3] = isSunward ? 0.95 : 0.4;
-      particleColors[i * 3 + 1] = isSunward ? 0.75 : 0.9;
-      particleColors[i * 3 + 2] = isSunward ? 0.2 : 1.0;
-    }
-
-    particleGeo.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
-    particleGeo.setAttribute('color', new THREE.BufferAttribute(particleColors, 3));
-
-    const particleMat = new THREE.PointsMaterial({
-      size: 0.08,
-      vertexColors: true,
-      transparent: true,
-      opacity: 0.75,
-      blending: THREE.AdditiveBlending,
-    });
-
-    const particles = new THREE.Points(particleGeo, particleMat);
-    particlesGroupRef.current = particles;
-    scene.add(particles);
-
-    // 7. Interactive Mouse Orbit Controls
-    let isDragging = false;
-    let previousMousePosition = { x: 0, y: 0 };
-    let cameraAngle = { theta: 0.2, phi: 1.1, radius: 14 };
-
-    const updateCameraPosition = () => {
-      cameraAngle.phi = Math.max(0.1, Math.min(Math.PI - 0.1, cameraAngle.phi));
-      camera.position.x = cameraAngle.radius * Math.sin(cameraAngle.phi) * Math.sin(cameraAngle.theta);
-      camera.position.y = cameraAngle.radius * Math.cos(cameraAngle.phi);
-      camera.position.z = cameraAngle.radius * Math.sin(cameraAngle.phi) * Math.cos(cameraAngle.theta);
-      camera.lookAt(0, 0, 0);
-    };
-    updateCameraPosition();
-
-    const onMouseDown = (e: MouseEvent) => {
-      isDragging = true;
-      previousMousePosition = { x: e.clientX, y: e.clientY };
-    };
-
-    const onMouseMove = (e: MouseEvent) => {
-      if (!isDragging) return;
-      const deltaX = e.clientX - previousMousePosition.x;
-      const deltaY = e.clientY - previousMousePosition.y;
-
-      cameraAngle.theta -= deltaX * 0.008;
-      cameraAngle.phi -= deltaY * 0.008;
-      updateCameraPosition();
-
-      previousMousePosition = { x: e.clientX, y: e.clientY };
-    };
-
-    const onMouseUp = () => {
-      isDragging = false;
-    };
-
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      cameraAngle.radius = Math.max(4, Math.min(28, cameraAngle.radius + e.deltaY * 0.015));
-      updateCameraPosition();
-    };
-
-    const domElement = renderer.domElement;
-    domElement.addEventListener('mousedown', onMouseDown);
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
-    domElement.addEventListener('wheel', onWheel, { passive: false });
-
-    // 8. Animation Loop
-    let animId: number;
-    const clock = new THREE.Clock();
-
-    const animate = () => {
-      const elapsed = clock.getElapsedTime();
-
-      // Earth rotation and tilt
-      if (earthMeshRef.current) {
-        earthMeshRef.current.rotation.z = (earthConfig.tiltAngle * Math.PI) / 180;
-        if (autoRotate) {
-          earthMeshRef.current.rotation.y = elapsed * 0.25;
-        }
+    const scene=new THREE.Scene(); scene.background=new THREE.Color('#050a12');
+    const camera=new THREE.PerspectiveCamera(45,1,0.01,2000); camera.position.set(0,6,24);
+    const controls=new OrbitControls(camera,renderer.domElement); controls.enableDamping=true; controls.minDistance=2; controls.maxDistance=450;
+    const earth=new THREE.Group();
+    earth.add(new THREE.Mesh(new THREE.SphereGeometry(1,32,24),new THREE.MeshBasicMaterial({ color:0x12314f })));
+    earth.add(new THREE.Mesh(new THREE.SphereGeometry(1.005,16,12),new THREE.MeshBasicMaterial({ color:0x38bdf8,wireframe:true,transparent:true,opacity:0.18 })));
+    scene.add(earth);
+    const moon=new THREE.Mesh(new THREE.SphereGeometry(0.2727,20,16),new THREE.MeshBasicMaterial({ color:0xcbd5e1, wireframe:true })); scene.add(moon);
+    const sourceGroup=new THREE.Group(), boundaries=new THREE.Group(), lines=new THREE.Group();
+    scene.add(sourceGroup,boundaries,lines);
+    const cloudGeometry=new THREE.BufferGeometry(); cloudGeometry.setAttribute('position',new THREE.BufferAttribute(new Float32Array(3000*3),3)); cloudGeometry.setDrawRange(0,0);
+    cloudGeometry.setAttribute('color',new THREE.BufferAttribute(new Float32Array(3000*3),3));
+    const cloud=new THREE.Points(cloudGeometry,new THREE.PointsMaterial({ vertexColors:true, size:0.014, transparent:true, opacity:0.7 })); scene.add(cloud);
+    const pulseGeo=new THREE.BufferGeometry(); pulseGeo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(64*3),3)); pulseGeo.setDrawRange(0,0);
+    const pulses=new THREE.Points(pulseGeo,new THREE.PointsMaterial({ color:0x67e8f9,size:0.055,transparent:true,opacity:0.55 })); scene.add(pulses);
+    refs.current={ scene,renderer,camera,controls,earth,moon,sources:sourceGroup,boundaries,lines,cloud,pulses };
+    let frame=0, previous=performance.now(), count=0, mark=previous, phase=0;
+    const draw=(now:number) => {
+      frame=requestAnimationFrame(draw);
+      if(document.hidden) { previous=now; return; }
+      const dt=Math.min(0.05,(now-previous)/1000); previous=now;
+      const state=latest.current;
+      if(state.isPlaying) phase+=dt;
+      const position=moonPosition(state.earthConfig,state.moonConfig);
+      earth.position.set(state.earthConfig.x,state.earthConfig.y,0); earth.scale.setScalar(state.earthConfig.radius);
+      earth.visible=state.layerVisibility.earthBody;
+      moon.position.set(position.x,position.y,0); moon.rotation.z=state.moonConfig.phaseAngleDeg*Math.PI/180;
+      moon.visible=state.moonConfig.enabled && state.layerVisibility.moonBody;
+      // Same planar atmospheric particles as 2D, not invented independent 3D dynamics.
+      const cloudPositions=cloudGeometry.getAttribute('position') as THREE.BufferAttribute;
+      const cloudColors=cloudGeometry.getAttribute('color') as THREE.BufferAttribute;
+      const particles=state.particleSystem.particles, bands=state.particleSystem.cloudBands;
+      const n=state.layerVisibility.cloudParticles && state.cloudConfig.showParticles ? Math.min(2700,particles.length) : 0;
+      let drawn=0;
+      for(let i=0;i<n;i++) {
+        const at=displayCloudPosition(particles[i].x,particles[i].y,state.earthConfig,state.cloudConfig);
+        cloudPositions.setXYZ(drawn,at.x,at.y,0);
+        const light=particles[i].condensationFactor*particles[i].opacity;
+        cloudColors.setXYZ(drawn,light*0.8,light*0.93,light);drawn++;
       }
-
-      // Particles flow along 3D field loops
-      if (particlesGroupRef.current) {
-        const positions = particlesGroupRef.current.geometry.attributes.position.array as Float32Array;
-        for (let i = 0; i < particleCount; i++) {
-          let x = positions[i * 3];
-          let y = positions[i * 3 + 1];
-          let z = positions[i * 3 + 2];
-
-          // Slow drift
-          y += Math.sin(elapsed + x) * 0.008;
-          x += (solarWind.enabled ? -0.015 * solarWind.speed : 0) + Math.cos(elapsed + z) * 0.005;
-
-          // Recycle particles
-          if (x < -6.0 || Math.hypot(x, y, z) < 1.25) {
-            const r = 1.35 + Math.random() * 3.5;
-            const theta = Math.random() * Math.PI * 2;
-            const phi = Math.acos(Math.random() * 2 - 1);
-            x = r * Math.sin(phi) * Math.cos(theta);
-            y = r * Math.sin(phi) * Math.sin(theta);
-            z = r * Math.cos(phi);
-          }
-
-          positions[i * 3] = x;
-          positions[i * 3 + 1] = y;
-          positions[i * 3 + 2] = z;
-        }
-        particlesGroupRef.current.geometry.attributes.position.needsUpdate = true;
+      if(state.layerVisibility.cloudBands || state.layerVisibility.waveClouds) for(const band of bands) {
+        if(drawn>=3000)break;
+        const at=displayCloudPosition(band.x,band.y,state.earthConfig,state.cloudConfig);
+        const light=Math.max(state.layerVisibility.cloudBands ? band.baseline : 0,state.layerVisibility.waveClouds && state.cloudConfig.showWaveClouds ? band.hypothesis : 0);
+        cloudPositions.setXYZ(drawn,at.x,at.y,0);cloudColors.setXYZ(drawn,light*0.8,light*0.93,light);drawn++;
       }
-
-      renderer.render(scene, camera);
-      animId = requestAnimationFrame(animate);
-    };
-
-    animate();
-
-    // 9. Resize observer
-    const handleResize = () => {
-      if (!mount) return;
-      const newW = mount.clientWidth;
-      const newH = mount.clientHeight;
-      camera.aspect = newW / newH;
-      camera.updateProjectionMatrix();
-      renderer.setSize(newW, newH);
-    };
-
-    const resizeObserver = new ResizeObserver(handleResize);
-    resizeObserver.observe(mount);
-
-    return () => {
-      cancelAnimationFrame(animId);
-      resizeObserver.disconnect();
-      domElement.removeEventListener('mousedown', onMouseDown);
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
-      domElement.removeEventListener('wheel', onWheel);
-      if (mount && renderer.domElement) {
-        mount.removeChild(renderer.domElement);
+      cloudPositions.needsUpdate=true;cloudColors.needsUpdate=true;cloudGeometry.setDrawRange(0,drawn);
+      const currentGeometry=geometryRef.current;
+      if(currentGeometry) {
+        const positions=pulseGeo.getAttribute('position') as THREE.BufferAttribute;
+        const count=Math.min(64,currentGeometry.offsets.length-1);
+        for(let i=0;i<count;i++) {
+          const start=currentGeometry.offsets[i], length=currentGeometry.offsets[i+1]-start;
+          const index=length ? start+Math.floor((phase*15+i*7)%length) : 0;
+          positions.setXYZ(i,currentGeometry.positions[index*3]??0,currentGeometry.positions[index*3+1]??0,currentGeometry.positions[index*3+2]??0);
+        }
+        positions.needsUpdate=true; pulseGeo.setDrawRange(0,count);
       }
-      renderer.dispose();
+      controls.update(); renderer.render(scene,camera);
+      count++; if(now-mark>=1000) { setFps(Math.round(count*1000/(now-mark))); count=0; mark=now; }
     };
-  }, [earthConfig, solarWind, autoRotate]);
+    frame=requestAnimationFrame(draw);
+    const resize=()=> { const w=mount.clientWidth,h=mount.clientHeight; if(w<1||h<1)return; renderer.setSize(w,h); camera.aspect=w/h; camera.updateProjectionMatrix(); };
+    const observer=new ResizeObserver(resize); observer.observe(mount); resize();
+    const onEnd=()=>setExtent(Math.min(180,Math.max(4,controls.getDistance()*0.75)));
+    controls.addEventListener('end',onEnd);
+    const onContext=(event:MouseEvent)=>{
+      event.preventDefault();
+      const rect=renderer.domElement.getBoundingClientRect();
+      const mouse=new THREE.Vector2((event.clientX-rect.left)/rect.width*2-1,-(event.clientY-rect.top)/rect.height*2+1);
+      const ray=new THREE.Raycaster(); ray.setFromCamera(mouse,camera);
+      const at=ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0,0,1),0),new THREE.Vector3());
+      setProbe(at ? 'z=0 단면 측정: '+distanceLabel(at,latest.current.earthConfig) : '현재 시선은 z=0 단면과 평행합니다.');
+    };
+    renderer.domElement.addEventListener('contextmenu',onContext);
+    return ()=>{ cancelAnimationFrame(frame); observer.disconnect(); controls.removeEventListener('end',onEnd); controls.dispose();
+      renderer.domElement.removeEventListener('contextmenu',onContext); disposeGroup(scene); renderer.dispose(); renderer.domElement.remove(); refs.current=null; };
+  }, []);
+  const geometryRef=useRef(field.geometry); geometryRef.current=field.geometry;
 
-  // Update 3D Field Lines dynamically based on Earth dipole & external poles
-  useEffect(() => {
-    const fieldLinesGroup = fieldLinesGroupRef.current;
-    if (!fieldLinesGroup) return;
-
-    // Clear old lines and dispose GPU resources before rebuilding them.
-    while (fieldLinesGroup.children.length > 0) {
-      const child = fieldLinesGroup.children[0];
-      child.traverse((object) => {
-        const mesh = object as THREE.Mesh;
-        mesh.geometry?.dispose();
-        if (Array.isArray(mesh.material)) {
-          mesh.material.forEach((material) => material.dispose());
-        } else {
-          mesh.material?.dispose();
-        }
-      });
-      fieldLinesGroup.remove(child);
+  useEffect(()=>{
+    const ref=refs.current, geometry=field.geometry; if(!ref||!geometry)return;
+    disposeGroup(ref.lines);
+    const positions:number[]=[], alphas:number[]=[];
+    for(let l=0;l<geometry.offsets.length-1;l++) for(let j=geometry.offsets[l]+1;j<geometry.offsets[l+1];j++) {
+      for(const k of [j-1,j]) { positions.push(geometry.positions[3*k],geometry.positions[3*k+1],geometry.positions[3*k+2]); alphas.push(fieldOpacity(geometry.logs[k])); }
     }
+    const geo=new THREE.BufferGeometry(); geo.setAttribute('position',new THREE.Float32BufferAttribute(positions,3)); geo.setAttribute('strengthAlpha',new THREE.Float32BufferAttribute(alphas,1));
+    const mat=new THREE.ShaderMaterial({ transparent:true, depthWrite:false,
+      vertexShader:'attribute float strengthAlpha; varying float alpha; void main(){alpha=strengthAlpha; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}',
+      fragmentShader:'varying float alpha; void main(){gl_FragColor=vec4(0.22,0.83,0.98,alpha);}' });
+    ref.lines.add(new THREE.LineSegments(geo,mat));
+  },[field.geometry]);
 
-    if (!showFluxTubes) return;
-
-    // Source markers make the origin of each visible deformation explicit.
-    for (const source of sources) {
-      if (!source.active) continue;
-      const sourceColor = source.type === 'monopole_n'
-        ? 0xef4444
-        : source.type === 'monopole_s'
-          ? 0x3b82f6
-          : source.type === 'comet'
-            ? 0xf59e0b
-            : 0xa855f7;
-      const markerGroup = new THREE.Group();
-      markerGroup.position.set(source.x - earthConfig.x, source.y - earthConfig.y, source.z ?? 0);
-
-      const marker = new THREE.Mesh(
-        new THREE.SphereGeometry(0.16, 14, 14),
-        new THREE.MeshBasicMaterial({ color: sourceColor })
-      );
-      markerGroup.add(marker);
-      const influenceShell = new THREE.Mesh(
-        new THREE.SphereGeometry(0.45 + Math.min(0.7, Math.abs(source.strength) * 0.12), 14, 10),
-        new THREE.MeshBasicMaterial({
-          color: sourceColor,
-          transparent: true,
-          opacity: 0.12,
-          wireframe: true,
-        })
-      );
-      markerGroup.add(influenceShell);
-      fieldLinesGroup.add(markerGroup);
-    }
-
-    // Generate 3D Dipole Field Loops
-    const rings = 16;
-    const lValues = [2.2, 3.2, 4.5, 6.0]; // L-Shell parameters
-    const magnetopause = computeShueMagnetopauseRadius(0, solarWind.pressure, solarWind.imfBz);
-    const daysideScale = Math.max(0.55, Math.min(1.35, magnetopause.subsolarEarthRadii / 10.22));
-    const tailScale = Math.max(0.8, Math.min(1.5, magnetopause.flaring / 0.58));
-    const tilt = (earthConfig.tiltAngle * Math.PI) / 180;
-    const cosTilt = Math.cos(tilt);
-    const sinTilt = Math.sin(tilt);
-
-    for (const L of lValues) {
-      for (let rIdx = 0; rIdx < rings; rIdx++) {
-        const phi = (rIdx / rings) * Math.PI * 2;
-        const curvePoints: THREE.Vector3[] = [];
-
-        // Dipole field line equation: r = L * sin^2(theta)
-        for (let t = 0.18; t <= Math.PI - 0.18; t += 0.08) {
-          const r = L * Math.sin(t) * Math.sin(t);
-          let x = r * Math.sin(t) * Math.cos(phi);
-          let y = r * Math.cos(t);
-          let z = r * Math.sin(t) * Math.sin(phi);
-
-          // Solar wind day-side compression & night-side tail elongation
-          if (solarWind.enabled) {
-            if (x < 0) {
-              // Compressed dayside
-              x *= daysideScale;
-            } else {
-              // Stretched magnetotail
-              x *= tailScale;
-            }
-          }
-
-          // Rotate the analytical loop with the configured dipole axis before
-          // coupling the bounded external-source deformation.
-          const tiltedX = x * cosTilt - y * sinTilt;
-          const tiltedY = x * sinTilt + y * cosTilt;
-          const distortion = computeExternalMagnetosphereDistortion3D(
-            tiltedX + earthConfig.x,
-            tiltedY + earthConfig.y,
-            z,
-            sources
-          );
-          x = tiltedX + distortion.dx;
-          y = tiltedY + distortion.dy;
-          z += distortion.dz;
-
-          curvePoints.push(new THREE.Vector3(x, y, z));
-        }
-
-        if (curvePoints.length > 2) {
-          const curve = new THREE.CatmullRomCurve3(curvePoints);
-          const geometry = new THREE.TubeGeometry(curve, 32, 0.025, 6, false);
-
-          const intensity = 1.0 / (L * 0.35);
-          const material = new THREE.MeshBasicMaterial({
-            color: new THREE.Color().setHSL(0.55 + intensity * 0.15, 0.9, 0.6),
-            transparent: true,
-            opacity: 0.45,
-          });
-
-          const tube = new THREE.Mesh(geometry, material);
-          fieldLinesGroup.add(tube);
-        }
+  useEffect(()=>{
+    const ref=refs.current; if(!ref)return;
+    const active=sources.filter(s=>s.active&&s.type!=='uniform');
+    for(const child of [...ref.sources.children]) if(!active.some(s=>s.id===child.name)){disposeGroup(child);ref.sources.remove(child);}
+    for(const source of active) {
+      let marker=ref.sources.getObjectByName(source.id) as THREE.Group;
+      if(!marker) {
+        marker=new THREE.Group();marker.name=source.id;
+        const dipole=source.type==='dipole';
+        const north=new THREE.Mesh(new THREE.SphereGeometry(0.12,10,8),new THREE.MeshBasicMaterial({color:dipole?0xef4444:0xf59e0b}));
+        north.position.y=dipole?0.24:0;marker.add(north);
+        if(dipole){const south=new THREE.Mesh(new THREE.SphereGeometry(0.12,10,8),new THREE.MeshBasicMaterial({color:0x3b82f6}));south.position.y=-0.24;marker.add(south);}
+        ref.sources.add(marker);
       }
+      marker.position.set(source.x,source.y,source.z??0);marker.rotation.z=(source.angle??0)*Math.PI/180;
     }
-  }, [earthConfig, sources, solarWind, showFluxTubes]);
+  },[sources]);
 
-  return (
-    <div className="relative w-full h-full min-h-[520px] bg-[#08080b] rounded-lg overflow-hidden border border-[#1e1e24] shadow-2xl flex flex-col">
-      {/* 3D View Controls Bar - High Density */}
-      <div className="absolute top-2.5 left-2.5 right-2.5 z-20 flex flex-wrap items-center justify-between gap-2 pointer-events-none">
-        <div className="flex items-center gap-1 p-1 bg-[#0f0f13] rounded border border-[#1e1e24] shadow-lg pointer-events-auto">
-          <button
-            id="btn-toggle-flux-tubes"
-            onClick={() => setShowFluxTubes(!showFluxTubes)}
-            className={`px-2.5 py-1 text-xs font-mono rounded transition-colors flex items-center gap-1.5 ${
-              showFluxTubes
-                ? 'bg-[#181824] text-cyan-300 border border-[#2c2c3e] font-semibold'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Orbit className="w-3.5 h-3.5 text-cyan-400" />
-            3D Flux Tubes
-          </button>
-          <button
-            id="btn-toggle-bow-shock"
-            onClick={() => {
-              setShowBowShock(!showBowShock);
-              if (bowShockMeshRef.current) bowShockMeshRef.current.visible = !showBowShock;
-            }}
-            className={`px-2.5 py-1 text-xs font-mono rounded transition-colors flex items-center gap-1.5 ${
-              showBowShock
-                ? 'bg-[#181824] text-amber-300 border border-[#2c2c3e] font-semibold'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Shield className="w-3.5 h-3.5 text-amber-400" />
-            Bow Shock
-          </button>
-          <button
-            id="btn-toggle-3d-particles"
-            onClick={() => {
-              setShowCloudParticles(!showCloudParticles);
-              if (particlesGroupRef.current) particlesGroupRef.current.visible = !showCloudParticles;
-            }}
-            className={`px-2.5 py-1 text-xs font-mono rounded transition-colors flex items-center gap-1.5 ${
-              showCloudParticles
-                ? 'bg-[#181824] text-purple-300 border border-[#2c2c3e] font-semibold'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Sparkles className="w-3.5 h-3.5 text-purple-400" />
-            Cloud Particles
-          </button>
-        </div>
-
-        <div className="flex items-center gap-1 p-1 bg-[#0f0f13] rounded border border-[#1e1e24] shadow-lg pointer-events-auto">
-          <button
-            id="btn-toggle-auto-rotate"
-            onClick={() => setAutoRotate(!autoRotate)}
-            className={`p-1 rounded transition-colors ${
-              autoRotate ? 'text-cyan-400 bg-[#181824] border border-[#2c2c3e]' : 'text-slate-400 hover:text-white'
-            }`}
-            title="Toggle Earth Auto-Rotation"
-          >
-            <RotateCw className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      </div>
-
-      {/* Mount Container */}
-      <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing flex-1" />
-
-      <div
-        data-testid="external-distortion-status"
-        className="absolute top-14 right-2.5 z-20 px-2 py-1 bg-[#0f0f13]/90 rounded border border-[#2c2c3e] text-[10px] font-mono text-slate-300 pointer-events-none"
-        title="가설 시각화용 외부 자기원 결합 강도"
-      >
-        외부 변형원 <span className={activeSources.length > 0 ? 'text-amber-300 font-bold' : 'text-slate-500'}>{activeSources.length}</span>
-        {' · '}Σ|S| <span className="text-cyan-300">{activeSourceStrength.toFixed(1)}</span>
-      </div>
-
-      {/* Floating 3D Navigation Guide */}
-      <div className="absolute bottom-2.5 left-2.5 z-20 flex items-center gap-2 p-1.5 px-2 bg-[#0f0f13] rounded border border-[#1e1e24] text-[10px] font-mono text-slate-300 shadow-xl pointer-events-none">
-        <Compass className="w-3.5 h-3.5 text-cyan-400" />
-        <span>Drag to orbit 3D camera | Scroll to zoom</span>
-      </div>
+  useEffect(()=>{
+    const ref=refs.current; if(!ref)return;
+    disposeGroup(ref.boundaries);
+    const line=(points:THREE.Vector3[],color:number,dashed=false)=>{
+      const geometry=new THREE.BufferGeometry().setFromPoints(points);
+      const material=dashed ? new THREE.LineDashedMaterial({ color, dashSize:0.35,gapSize:0.2, transparent:true,opacity:0.5 }) : new THREE.LineBasicMaterial({ color,transparent:true,opacity:0.35 });
+      const object=new THREE.Line(geometry,material); object.computeLineDistances(); ref.boundaries.add(object);
+    };
+    if(research.distances && layerVisibility.gridAxes) for(const radius of [1,2,5,10,20,40,60]) {
+      if(radius>extent*1.5)continue;
+      const points=Array.from({length:97},(_,i)=>{ const a=i/96*Math.PI*2; return new THREE.Vector3(earthConfig.x+radius*Math.cos(a),earthConfig.y+radius*Math.sin(a),0); });
+      line(points,0x64748b,true);
+      const label=labelSprite(radius+' R_E · '+(radius*6371).toLocaleString()+' km'); label.position.set(earthConfig.x+radius,earthConfig.y,0); ref.boundaries.add(label);
+    }
+    if(research.weakBoundary && layerVisibility.streamlines) for(let phi=0;phi<Math.PI*2;phi+=Math.PI/4) {
+      line(Array.from({length:97},(_,i)=>{ const p=weakBoundaryPoint(i/96*Math.PI,phi,context,research.weakThresholdNt); return new THREE.Vector3(p.x,p.y,p.z); }),0xa78bfa,true);
+    }
+    if(research.magnetopause && showBoundary && layerVisibility.solarWind) for(let phi=0;phi<Math.PI*2;phi+=Math.PI/4) {
+      const points:THREE.Vector3[]=[];
+      for(let theta=0;theta<2.8;theta+=0.04) { const p=magnetopausePoint(theta,phi,context); if(p && Math.hypot(p.x-earthConfig.x,p.y-earthConfig.y,p.z)<extent*3)points.push(new THREE.Vector3(p.x,p.y,p.z)); }
+      if(points.length>1)line(points,0xf59e0b);
+    }
+    if(moonConfig.enabled && moonConfig.showOrbit && layerVisibility.moonOrbit) {
+      const radius=moonConfig.physicalDistanceEarthRadii??60.3;
+      line(Array.from({length:129},(_,i)=>new THREE.Vector3(earthConfig.x+radius*Math.cos(i/128*Math.PI*2),earthConfig.y+radius*Math.sin(i/128*Math.PI*2),0)),0xcbd5e1,true);
+    }
+  },[earthConfig,solarWind,research,extent,showBoundary,moonConfig.enabled,moonConfig.showOrbit,moonConfig.physicalDistanceEarthRadii,layerVisibility.gridAxes,layerVisibility.moonOrbit,layerVisibility.streamlines,layerVisibility.solarWind]);
+  useEffect(()=>{
+    const ref=refs.current;if(!ref)return;
+    ref.controls.autoRotate=autoRotate && isPlaying;
+    ref.lines.visible=showFlux && layerVisibility.streamlines; ref.pulses.visible=ref.lines.visible;
+    ref.sources.visible=layerVisibility.externalSources;
+    ref.cloud.visible=showParticles && (layerVisibility.cloudParticles||layerVisibility.cloudBands||layerVisibility.waveClouds) && props.cloudConfig.enabled && !needsLogOnly(context);
+  },[autoRotate,isPlaying,showFlux,showParticles,layerVisibility,props.cloudConfig.enabled,sources]);
+  const fit=(radius:number)=>{ const ref=refs.current;if(!ref)return; ref.controls.target.set(earthConfig.x,earthConfig.y,0); ref.camera.position.set(earthConfig.x,earthConfig.y+radius*0.3,radius*2.6); ref.controls.update();setExtent(radius*1.25); };
+  return <div className="relative w-full h-full min-h-0 bg-[#050a12] overflow-hidden">
+    <div ref={mountRef} className="absolute inset-0" />
+    <div className="absolute top-2 left-2 right-2 z-20 flex flex-wrap gap-1 text-[10px]">
+      <button id="btn-toggle-flux-tubes" aria-pressed={showFlux} onClick={()=>props.setLayerVisibility(v=>({...v,streamlines:!v.streamlines}))} className="bg-slate-900 border rounded p-1">3D RK4 자기력선</button>
+      <button id="btn-toggle-bow-shock" aria-pressed={showBoundary} onClick={()=>props.setLayerVisibility(v=>({...v,solarWind:!v.solarWind}))} className="bg-slate-900 border rounded p-1">자기권계면</button>
+      <button id="btn-toggle-3d-particles" aria-pressed={showParticles} onClick={()=>props.setLayerVisibility(v=>({...v,cloudParticles:!showParticles,cloudBands:!showParticles,waveClouds:!showParticles}))} className="bg-slate-900 border rounded p-1">공유 입자 (z=0)</button>
+      <button id="btn-toggle-auto-rotate" aria-pressed={autoRotate} onClick={()=>setAutoRotate(v=>!v)} className="bg-slate-900 border rounded p-1">카메라 회전</button>
+      <button onClick={()=>setIsPlaying(v=>!v)} className="bg-slate-900 border rounded p-1">{isPlaying?'일시정지':'재생'}</button>
+      <button onClick={()=>fit(18)} className="bg-slate-900 border rounded p-1">자기권 맞춤</button>
+      <button onClick={()=>fit(moonConfig.physicalDistanceEarthRadii??60.3)} className="bg-slate-900 border rounded p-1">달 궤도 맞춤</button>
     </div>
-  );
+    <FieldReadout context={context} research={research} error={error??field.error} calculationMs={field.geometry?.elapsedMs} />
+    {layerVisibility.earthBody && <CoreFlowInset context={context} research={research} playing={isPlaying} />}
+    <div className="absolute top-28 right-2 z-40 max-w-[95%]"><VisualElementsGuidePanel layerVisibility={layerVisibility} setLayerVisibility={props.setLayerVisibility} supportedLayers={['earthBody','streamlines','solarWind','externalSources','moonBody','moonOrbit','cloudParticles','cloudBands','waveClouds','gridAxes','probeMarker']} /></div>
+    <p className="absolute bottom-10 left-2 text-[10px] bg-slate-950/90 p-1 pointer-events-none">공유 구름 단면: {props.cloudConfig.cloudAltitudeKm??12} ± {props.cloudConfig.cloudLayerHalfWidthKm??1.5} km · 고도 표시 ×{props.cloudConfig.altitudeDisplayGain??1}</p>
+    <p className="absolute bottom-3 left-2 text-[10px] bg-slate-950/90 p-1 pointer-events-none">{fps} FPS · 드래그 회전 / 휠 확대 · 우클릭: 중심 거리<br/>{layerVisibility.probeMarker ? probe : ''}</p>
+  </div>;
 };

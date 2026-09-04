@@ -1,313 +1,24 @@
 import { EarthDipoleConfig, ExternalMagneticSource, MoonConfig, SolarWindConfig } from '../types';
 import { EARTH_EQUATORIAL_FIELD_NT } from './physicsCalibration';
+import { earthField, sourceField, lunarField, sampleField, normalizedComponents, traceField, moonPosition } from './fieldModel';
 
-export const EPSILON = 0.05; // Regularizer to prevent division by zero at singularities
-
-/**
- * Calculates Earth's Dipole Magnetic Field at point (x, y)
- */
-export function calculateEarthDipoleField(
-  x: number,
-  y: number,
-  config: EarthDipoleConfig
-): { bx: number; by: number } {
-  const effectiveMoment = (config.reversed ? -1 : 1) * config.moment;
-  const dx = x - config.x;
-  const dy = y - config.y;
-  const rSquared = dx * dx + dy * dy;
-  const r = Math.sqrt(rSquared + EPSILON * EPSILON);
-  const r5 = Math.pow(r, 5);
-
-  // Rotate to dipole-aligned frame
-  const rad = (config.tiltAngle * Math.PI) / 180;
-  const cosT = Math.cos(rad);
-  const sinT = Math.sin(rad);
-
-  const xPrime = dx * cosT + dy * sinT;
-  const yPrime = -dx * sinT + dy * cosT;
-
-  const bxPrime = (3 * effectiveMoment * xPrime * yPrime) / r5;
-  const byPrime = (effectiveMoment * (2 * yPrime * yPrime - xPrime * xPrime)) / r5;
-
-  // Rotate back to global frame
-  const bx = bxPrime * cosT - byPrime * sinT;
-  const by = bxPrime * sinT + byPrime * cosT;
-
-  return { bx, by };
+export const EPSILON = 0.05;
+export function calculateEarthDipoleField(x: number, y: number, config: EarthDipoleConfig) {
+  return normalizedComponents(earthField({ x, y, z: 0 }, config));
 }
-
-/**
- * Calculates External Magnetic Source Field (Monopole, Dipole, or Approaching Comet) at point (x, y)
- */
-export function calculateExternalSourceField(
-  x: number,
-  y: number,
-  source: ExternalMagneticSource
-): { bx: number; by: number } {
-  if (!source.active) return { bx: 0, by: 0 };
-
-  const dx = x - source.x;
-  const dy = y - source.y;
-  const rSquared = dx * dx + dy * dy;
-  const r = Math.sqrt(rSquared + EPSILON * EPSILON);
-
-  if (source.type === 'monopole_n' || source.type === 'monopole_s') {
-    // Monopole approximation: B = q_m * r_vec / r^3
-    const qm = source.type === 'monopole_n' ? source.strength : -source.strength;
-    const r3 = Math.pow(r, 3);
-    return {
-      bx: (qm * dx) / r3,
-      by: (qm * dy) / r3,
-    };
-  } else if (source.type === 'dipole') {
-    // External Dipole source
-    const r5 = Math.pow(r, 5);
-    const angleRad = ((source.angle || 0) * Math.PI) / 180;
-    const cosA = Math.cos(angleRad);
-    const sinA = Math.sin(angleRad);
-
-    const xPrime = dx * cosA + dy * sinA;
-    const yPrime = -dx * sinA + dy * cosA;
-
-    const bxPrime = (3 * source.strength * xPrime * yPrime) / r5;
-    const byPrime = (source.strength * (2 * yPrime * yPrime - xPrime * xPrime)) / r5;
-
-    return {
-      bx: bxPrime * cosA - byPrime * sinA,
-      by: bxPrime * sinA + byPrime * cosA,
-    };
-  } else if (source.type === 'comet') {
-    // Approaching Comet with Induced Plasma Magnetosphere & Draped Ion Tail
-    // Comet nucleus at (source.x, source.y)
-    // Coma diamagnetic shielding + Bow Shock + Ion tail draping along anti-solar direction (+X)
-    const tailLen = source.cometTailLength || 3.0;
-    const gasActivity = source.cometGasActivity || source.strength || 2.5;
-
-    // 1. Coma Diamagnetic Cavity & Outgassing Field
-    const r3 = Math.pow(r, 3);
-    let cbx = -(gasActivity * 0.35 * dx) / r3;
-    let cby = -(gasActivity * 0.35 * dy) / r3;
-
-    // 2. Draped Ion Tail along anti-solar (+X) direction from comet head
-    if (dx > 0 && dx < tailLen) {
-      const tailWidth = 0.35 + dx * 0.18;
-      const tailEnvelope = Math.exp(-(dy * dy) / (2 * tailWidth * tailWidth)) * Math.exp(-dx / tailLen);
-      // Draped lobes: top lobe (dy > 0) has field pointing towards nucleus (-X), bottom lobe (+X)
-      const tailLobeBx = (dy > 0 ? -1 : 1) * gasActivity * 0.75 * tailEnvelope;
-      const tailLobeBy = (dy / tailWidth) * gasActivity * 0.25 * tailEnvelope;
-      cbx += tailLobeBx;
-      cby += tailLobeBy;
-    }
-
-    // 3. Upstream Cometary Bow Shock (dx < 0)
-    if (dx < 0 && dx > -0.8 && Math.abs(dy) < 1.2) {
-      const shockStrength = gasActivity * 0.5 * Math.exp(-Math.hypot(dx, dy) / 0.6);
-      cbx += shockStrength * 0.5;
-      cby += shockStrength * (dy > 0 ? 0.3 : -0.3);
-    }
-
-    return { bx: cbx, by: cby };
-  }
-
-  return { bx: 0, by: 0 };
+export function calculateExternalSourceField(x: number, y: number, source: ExternalMagneticSource) {
+  return normalizedComponents(sourceField({ x, y, z: 0 }, source));
 }
-
-/**
- * Calculates Solar Wind & IMF (Interplanetary Magnetic Field) contribution
- */
-export function calculateSolarWindField(
-  x: number,
-  y: number,
-  solarWind: SolarWindConfig,
-  earthConfig: EarthDipoleConfig
-): { bx: number; by: number } {
-  if (!solarWind.enabled) return { bx: 0, by: 0 };
-
-  // IMF inputs are nT, whereas the renderer uses an Earth-surface-normalized field.
-  // The explicit gain keeps nT-scale vectors visible; pressure changes the
-  // magnetopause boundary (Shue model), not the magnetic vector by itself.
-  const displayGain = Math.max(1, solarWind.fieldVisualizationGain ?? 1_000);
-  return {
-    bx: (solarWind.imfBx / EARTH_EQUATORIAL_FIELD_NT) * displayGain,
-    by: (solarWind.imfBz / EARTH_EQUATORIAL_FIELD_NT) * displayGain,
-  };
+export function calculateSolarWindField(x: number, y: number, solar: SolarWindConfig, earth: EarthDipoleConfig) {
+  return { bx: solar.enabled ? solar.imfBx / EARTH_EQUATORIAL_FIELD_NT : 0, by: solar.enabled ? solar.imfBz / EARTH_EQUATORIAL_FIELD_NT : 0 };
 }
-
-/**
- * Calculates the Moon's Local Crustal Magnetic Field & Downstream Plasma Wake Cavity
- */
-export function calculateMoonField(
-  x: number,
-  y: number,
-  moonConfig: MoonConfig,
-  solarWind: SolarWindConfig,
-  earthConfig: EarthDipoleConfig
-): { bx: number; by: number; moonX: number; moonY: number; distToMoon: number } {
-  if (!moonConfig || !moonConfig.enabled) {
-    return { bx: 0, by: 0, moonX: 0, moonY: 0, distToMoon: 999 };
-  }
-
-  const rad = (moonConfig.phaseAngleDeg * Math.PI) / 180;
-  const moonX = earthConfig.x + moonConfig.orbitRadius * Math.cos(rad);
-  const moonY = earthConfig.y + moonConfig.orbitRadius * Math.sin(rad);
-
-  const dx = x - moonX;
-  const dy = y - moonY;
-  const rSquared = dx * dx + dy * dy;
-  const r = Math.sqrt(rSquared + EPSILON * EPSILON);
-  const r5 = Math.pow(r, 5);
-
-  // 1. Lunar Remanent Crustal Dipole (Reiner Gamma-like swirl dipole)
-  const angleRad = ((moonConfig.remanentAngle || 0) * Math.PI) / 180;
-  const cosA = Math.cos(angleRad);
-  const sinA = Math.sin(angleRad);
-
-  const xPrime = dx * cosA + dy * sinA;
-  const yPrime = -dx * sinA + dy * cosA;
-
-  const bxPrime = (3 * moonConfig.remanentMoment * xPrime * yPrime) / r5;
-  const byPrime = (moonConfig.remanentMoment * (2 * yPrime * yPrime - xPrime * xPrime)) / r5;
-
-  let bx = bxPrime * cosA - byPrime * sinA;
-  let by = bxPrime * sinA + byPrime * cosA;
-
-  // 2. Lunar Plasma Wake (Diamagnetic Cavity in Solar Wind)
-  // When in solar wind (or tail), Moon absorbs ions creating density depletion downstream (+X direction)
-  if (solarWind.enabled && dx > 0 && dx < 2.2) {
-    const wakeWidth = moonConfig.radius * 1.6 + dx * 0.15;
-    if (Math.abs(dy) < wakeWidth) {
-      const wakeDepth = Math.exp(-(dy * dy) / (2 * wakeWidth * wakeWidth)) * Math.exp(-dx / 1.8);
-      const wakeCavityBx = -solarWind.imfBx * 0.12 * wakeDepth * (moonConfig.wakeCavityStrength || 0.7);
-      const wakeCavityBy = (dy > 0 ? 0.08 : -0.08) * wakeDepth * (moonConfig.wakeCavityStrength || 0.7);
-      bx += wakeCavityBx;
-      by += wakeCavityBy;
-    }
-  }
-
-  return { bx, by, moonX, moonY, distToMoon: r };
+export function calculateMoonField(x: number, y: number, moon: MoonConfig, solar: SolarWindConfig, earth: EarthDipoleConfig) {
+  const position = moonPosition(earth, moon);
+  return { ...normalizedComponents(lunarField({ x, y, z: 0 }, { earth, solar, moon, sources: [] })),
+    moonX: position.x, moonY: position.y, distToMoon: Math.hypot(x-position.x, y-position.y) };
 }
-
-/**
- * Computes Composite Magnetic Vector Field (Superposition Principle)
- */
-export function computeTotalMagneticField(
-  x: number,
-  y: number,
-  earthConfig: EarthDipoleConfig,
-  sources: ExternalMagneticSource[],
-  solarWind: SolarWindConfig,
-  moonConfig?: MoonConfig
-): { bx: number; by: number; magnitude: number } {
-  // 1. Earth Dipole
-  const earthField = calculateEarthDipoleField(x, y, earthConfig);
-  let bx = earthField.bx;
-  let by = earthField.by;
-
-  // 2. Superposition of all active external sources
-  for (const source of sources) {
-    if (source.active) {
-      const sField = calculateExternalSourceField(x, y, source);
-      bx += sField.bx;
-      by += sField.by;
-    }
-  }
-
-  // 3. Solar Wind & IMF contribution
-  const swField = calculateSolarWindField(x, y, solarWind, earthConfig);
-  bx += swField.bx;
-  by += swField.by;
-
-  // 4. Moon Crustal Magnetic Field & Plasma Wake
-  if (moonConfig && moonConfig.enabled) {
-    const mField = calculateMoonField(x, y, moonConfig, solarWind, earthConfig);
-    bx += mField.bx;
-    by += mField.by;
-  }
-
-  const magnitude = Math.sqrt(bx * bx + by * by);
-
-  return { bx, by, magnitude };
-}
-
-export interface MagnetosphereDistortion3D {
-  dx: number;
-  dy: number;
-  dz: number;
-  influence: number;
-}
-
-/**
- * Bounded visual displacement for the 3D magnetosphere.
- *
- * This is a hypothesis visualisation coupling, not a validated prediction of
- * magnetohydrodynamic plasma motion. It projects the configured external source
- * types into 3D while using softening and a hard displacement cap so singular
- * source fields cannot tear or invert the rendered flux tubes.
- */
-export function computeExternalMagnetosphereDistortion3D(
-  x: number,
-  y: number,
-  z: number,
-  sources: ExternalMagneticSource[],
-  maxDisplacement: number = 1.8
-): MagnetosphereDistortion3D {
-  let dx = 0;
-  let dy = 0;
-  let dz = 0;
-  let influence = 0;
-
-  for (const source of sources) {
-    if (!source.active) continue;
-
-    const rx = x - source.x;
-    const ry = y - source.y;
-    const rz = z - (source.z ?? 0);
-    const softenedR2 = rx * rx + ry * ry + rz * rz + 0.45 * 0.45;
-    const r = Math.sqrt(softenedR2);
-    const sourceScale = Math.tanh(Math.max(0, Math.abs(source.strength)) / 3);
-    const falloff = sourceScale / (1 + 0.28 * softenedR2);
-
-    if (source.type === 'monopole_n' || source.type === 'monopole_s') {
-      const polarity = source.type === 'monopole_n' ? 1 : -1;
-      const gain = polarity * falloff * 1.35;
-      dx += (rx / r) * gain;
-      dy += (ry / r) * gain;
-      dz += (rz / r) * gain;
-      influence += Math.abs(gain);
-    } else if (source.type === 'dipole') {
-      const angle = ((source.angle ?? 0) * Math.PI) / 180;
-      const mx = Math.cos(angle);
-      const my = Math.sin(angle);
-      const dot = (mx * rx + my * ry) / r;
-      const gain = falloff * 1.15;
-      dx += (3 * dot * (rx / r) - mx) * gain;
-      dy += (3 * dot * (ry / r) - my) * gain;
-      dz += 3 * dot * (rz / r) * gain;
-      influence += Math.abs(gain);
-    } else if (source.type === 'comet') {
-      const tailLength = Math.max(1, source.cometTailLength ?? 3);
-      const tailEnvelope = rx > 0
-        ? Math.exp(-rx / tailLength) * Math.exp(-(ry * ry + rz * rz) / 2.2)
-        : 0;
-      const cavityGain = falloff * 0.9;
-      dx -= (rx / r) * cavityGain;
-      dy -= (ry / r) * cavityGain;
-      dz -= (rz / r) * cavityGain;
-      dx += tailEnvelope * sourceScale * 0.85;
-      dy += Math.sign(ry || 1) * tailEnvelope * sourceScale * 0.18;
-      influence += Math.abs(cavityGain) + tailEnvelope * sourceScale;
-    }
-  }
-
-  const length = Math.hypot(dx, dy, dz);
-  if (length > maxDisplacement && length > 0) {
-    const scale = maxDisplacement / length;
-    dx *= scale;
-    dy *= scale;
-    dz *= scale;
-  }
-
-  return { dx, dy, dz, influence: Math.min(influence, 4) };
+export function computeTotalMagneticField(x: number, y: number, earth: EarthDipoleConfig, sources: ExternalMagneticSource[], solar: SolarWindConfig, moon?: MoonConfig) {
+  return normalizedComponents(sampleField({ x, y, z: 0 }, { earth, sources, solar, moon }));
 }
 
 /**
@@ -338,73 +49,12 @@ export function computeFieldGradient(
  * Traces a Streamline using 4th-Order Runge-Kutta (RK4) Integration
  */
 export function traceStreamlineRK4(
-  startX: number,
-  startY: number,
-  earthConfig: EarthDipoleConfig,
-  sources: ExternalMagneticSource[],
-  solarWind: SolarWindConfig,
-  direction: 1 | -1 = 1,
-  maxSteps: number = 180,
-  stepSize: number = 0.05,
-  bounds: { minX: number; maxX: number; minY: number; maxY: number } = { minX: -6, maxX: 6, minY: -4, maxY: 4 },
-  moonConfig?: MoonConfig
-): Array<{ x: number; y: number; bMag: number }> {
-  const points: Array<{ x: number; y: number; bMag: number }> = [];
-  let currX = startX;
-  let currY = startY;
-
-  for (let i = 0; i < maxSteps; i++) {
-    const f0 = computeTotalMagneticField(currX, currY, earthConfig, sources, solarWind, moonConfig);
-    if (f0.magnitude < 1e-4) break;
-
-    points.push({ x: currX, y: currY, bMag: f0.magnitude });
-
-    // Out of bounds check
-    if (
-      currX < bounds.minX ||
-      currX > bounds.maxX ||
-      currY < bounds.minY ||
-      currY > bounds.maxY
-    ) {
-      break;
-    }
-
-    // Check if entered Earth core
-    const distToEarth = Math.hypot(currX - earthConfig.x, currY - earthConfig.y);
-    if (distToEarth < earthConfig.radius * 0.4 && i > 3) {
-      break;
-    }
-
-    // RK4 Integration Steps
-    const h = stepSize * direction;
-
-    // k1
-    const k1x = (f0.bx / f0.magnitude) * h;
-    const k1y = (f0.by / f0.magnitude) * h;
-
-    // k2
-    const f1 = computeTotalMagneticField(currX + 0.5 * k1x, currY + 0.5 * k1y, earthConfig, sources, solarWind, moonConfig);
-    if (f1.magnitude < 1e-4) break;
-    const k2x = (f1.bx / f1.magnitude) * h;
-    const k2y = (f1.by / f1.magnitude) * h;
-
-    // k3
-    const f2 = computeTotalMagneticField(currX + 0.5 * k2x, currY + 0.5 * k2y, earthConfig, sources, solarWind, moonConfig);
-    if (f2.magnitude < 1e-4) break;
-    const k3x = (f2.bx / f2.magnitude) * h;
-    const k3y = (f2.by / f2.magnitude) * h;
-
-    // k4
-    const f3 = computeTotalMagneticField(currX + k3x, currY + k3y, earthConfig, sources, solarWind, moonConfig);
-    if (f3.magnitude < 1e-4) break;
-    const k4x = (f3.bx / f3.magnitude) * h;
-    const k4y = (f3.by / f3.magnitude) * h;
-
-    currX += (k1x + 2 * k2x + 2 * k3x + k4x) / 6;
-    currY += (k1y + 2 * k2y + 2 * k3y + k4y) / 6;
-  }
-
-  return points;
+  startX: number, startY: number, earth: EarthDipoleConfig, sources: ExternalMagneticSource[], solar: SolarWindConfig,
+  direction: 1 | -1 = 1, maxSteps = 180, step = 0.05,
+  bounds = { minX: -6, maxX: 6, minY: -4, maxY: 4 }, moon?: MoonConfig
+) {
+  return traceField({ x: startX, y: startY, z: 0 }, { earth, sources, solar, moon }, direction, maxSteps, step,
+    p => p.x >= bounds.minX && p.x <= bounds.maxX && p.y >= bounds.minY && p.y <= bounds.maxY, true);
 }
 
 /**
@@ -790,25 +440,15 @@ export function mapSkyDomeToAtmosphere(
   const obsRad = (observerAngleDeg * Math.PI) / 180;
   const earthR = earthConfig.radius;
   
-  // Convert atmospheric altitude (e.g. 8 km scaled to R_E units where R_E ~ 6371km => 8/6371 ~ 0.00125 * scale)
-  const atmAltitudeUnits = earthR * 0.22; // Scaled atmospheric layer for 2D visual fidelity
-  
-  // Displacement along horizon (tangent) and zenith (normal)
-  const zenithOffset = Math.cos(zenithAngleRad) * atmAltitudeUnits;
-  const horizonOffset = Math.sin(zenithAngleRad) * Math.cos(azimuthRad) * (atmAltitudeUnits * 3.2);
-
-  // Observer center position
-  const ox = earthConfig.x + earthR * Math.cos(obsRad);
-  const oy = earthConfig.y + earthR * Math.sin(obsRad);
-
-  // Normal (zenith) and Tangent (horizon) unit vectors
-  const normX = Math.cos(obsRad);
-  const normY = Math.sin(obsRad);
-  const tangX = -Math.sin(obsRad);
-  const tangY = Math.cos(obsRad);
-
-  const wx = ox + normX * zenithOffset + tangX * horizonOffset;
-  const wy = oy + normY * zenithOffset + tangY * horizonOffset;
+  // Intersection with the physical cloud shell in the 2D meridian.
+  // Azimuth is projected: this is not a full 3D atmosphere.
+  const altitude = Math.max(0,altitudeKm)/6371;
+  const normal = Math.cos(zenithAngleRad), tangent = Math.sin(zenithAngleRad)*Math.cos(azimuthRad);
+  const length = Math.hypot(normal,tangent)||1, nr=normal/length,tr=tangent/length;
+  const travel = -earthR*nr+Math.sqrt((earthR*nr)**2+2*earthR*altitude+altitude**2);
+  const ox=earthConfig.x+earthR*Math.cos(obsRad),oy=earthConfig.y+earthR*Math.sin(obsRad);
+  const wx=ox+travel*(nr*Math.cos(obsRad)-tr*Math.sin(obsRad));
+  const wy=oy+travel*(nr*Math.sin(obsRad)+tr*Math.cos(obsRad));
 
   return {
     wx,

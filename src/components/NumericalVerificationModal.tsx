@@ -3,6 +3,7 @@ import { AtmosphericCloudConfig, EarthDipoleConfig, ExternalMagneticSource, Moon
 import { Check, Copy, Download, FileCode, Sparkles, Terminal, X } from 'lucide-react';
 import { requestGemini, turnstileSiteKey } from '../services/geminiApiClient';
 import { TurnstileWidget } from './TurnstileWidget';
+import { ResearchConfig } from '../physics/fieldModel';
 import { buildVerificationPython } from '../physics/verificationScript';
 
 interface NumericalVerificationModalProps {
@@ -13,6 +14,7 @@ interface NumericalVerificationModalProps {
   solarWind: SolarWindConfig;
   cloudConfig: AtmosphericCloudConfig;
   moonConfig: MoonConfig;
+  research: ResearchConfig;
 }
 
 export const NumericalVerificationModal: React.FC<NumericalVerificationModalProps> = ({
@@ -23,7 +25,9 @@ export const NumericalVerificationModal: React.FC<NumericalVerificationModalProp
   solarWind,
   cloudConfig,
   moonConfig,
+  research,
 }) => {
+  const [basePythonCode] = useState(() => buildVerificationPython(earthConfig,sources,solarWind,cloudConfig,moonConfig,research));
   const [copied, setCopied] = useState(false);
   const [isGeneratingAICode, setIsGeneratingAICode] = useState(false);
   const [customRequest, setCustomRequest] = useState('');
@@ -51,7 +55,7 @@ export const NumericalVerificationModal: React.FC<NumericalVerificationModalProp
 
   if (!isOpen) return null;
 
-  const basePythonCode = buildVerificationPython(earthConfig, sources, solarWind, cloudConfig, moonConfig);
+  // Freeze the export at opening; ongoing orbits must not mutate a script being read/copied.
   const currentCode = generatedCode || basePythonCode;
 
   const download = (content: string, filename: string, type: string) => {
@@ -140,7 +144,7 @@ export const NumericalVerificationModal: React.FC<NumericalVerificationModalProp
             <div className="p-1.5 rounded bg-cyan-950/60 text-cyan-400 border border-cyan-500/30"><Terminal className="w-4 h-4" /></div>
             <div>
               <h3 id="verification-title" className="font-semibold text-slate-100 text-xs font-mono">Python 가설/대조군 수치 분석</h3>
-              <p id="verification-description" className="text-[10px] text-slate-400">현재 UI 상태와 동일한 방정식으로 coupled − control 차이를 출력합니다.</p>
+              <p id="verification-description" className="text-[10px] text-slate-400">창을 연 시점의 입력을 고정합니다. 자기장과 시간 0 가설/대조군 진단이며 구름 궤적 전체 재현은 아닙니다.</p>
             </div>
           </div>
           <button ref={closeButtonRef} id="btn-close-verification-modal" aria-label="수치 분석 창 닫기" onClick={onClose} className="p-1.5 text-slate-400 hover:text-white rounded hover:bg-[#1a1a24] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500/60"><X className="w-4 h-4" /></button>

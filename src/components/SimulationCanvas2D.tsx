@@ -1544,10 +1544,11 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
       <FieldReadout context={context} research={research} error={field.error} calculationMs={field.geometry?.elapsedMs} />
       {currentLayers.earthBody && <CoreFlowInset context={context} research={research} playing={isPlaying} />}
       <p className="absolute bottom-12 left-2 z-20 text-[10px] bg-slate-950/90 p-1 pointer-events-none">구름층: {(cloudConfig.cloudAltitudeKm??12)} ± {(cloudConfig.cloudLayerHalfWidthKm??1.5)} km · 고도 표시 ×{cloudConfig.altitudeDisplayGain??1} · 점 최소 크기는 위치 표식</p>
-      {/* Top Floating Control Bar - High Density */}
-      <div className="absolute top-2.5 left-2.5 right-2.5 z-20 flex flex-wrap items-center justify-between gap-2 pointer-events-none">
+      {/* Keep the guide after wrapped controls instead of a fixed top offset. */}
+      <div role="group" aria-label="2D 관측 및 표시 도구" className="absolute top-2.5 left-2.5 right-2.5 z-30 flex max-h-[calc(100%-1.25rem)] flex-col gap-2 pointer-events-none">
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
         {/* Left: Perspective and Mode Switchers */}
-        <div className="flex items-center gap-1.5 flex-wrap pointer-events-auto">
+        <div className="flex min-w-0 max-w-full items-center gap-1.5 flex-wrap pointer-events-auto">
           {/* Perspective Selector */}
           <div className="flex items-center gap-0.5 p-0.5 bg-[#0e0e13]/95 backdrop-blur-md rounded-md border border-[#1e1e24] shadow-md">
             <button
@@ -1577,7 +1578,20 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
           </div>
 
           {/* Inspection View Mode Selector */}
-          <div className="flex items-center gap-0.5 p-0.5 bg-[#0e0e13]/95 backdrop-blur-md rounded-md border border-[#1e1e24] shadow-md">
+          <div className="flex max-w-full flex-wrap items-center gap-0.5 p-0.5 bg-[#0e0e13]/95 backdrop-blur-md rounded-md border border-[#1e1e24] shadow-md">
+            <button
+              id="btn-fit-moon-orbit-2d"
+              type="button"
+              onClick={() => {
+                const fitted = Math.max(1, Math.min(containerRef.current?.clientWidth ?? 800, containerRef.current?.clientHeight ?? 600) / ((moonConfig?.physicalDistanceEarthRadii ?? 60.3) * 2.4));
+                setZoom(fitted);
+                setPan({ x: -earthConfig.x * fitted, y: earthConfig.y * fitted });
+              }}
+              className="shrink-0 whitespace-nowrap px-2 py-1 text-[11px] font-mono font-medium rounded text-slate-300 hover:text-cyan-300 hover:bg-[#14141c] focus-visible:outline-2 focus-visible:outline-cyan-400 transition-colors"
+              title="달의 전체 공전 궤도에 맞춰 2D 화면 확대율과 중심 조정"
+            >
+              달 궤도 맞춤
+            </button>
             <button
               onClick={() => setCloudConfig((prev) => ({ ...prev, inspectionMode: 'none' }))}
               className={`px-2 py-1 text-[11px] font-mono font-medium rounded transition-colors ${
@@ -1745,15 +1759,16 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
             <RotateCcw className="w-3.5 h-3.5" />
           </button>
         </div>
-      </div>
 
-      {/* Top-Right Floating Visual Elements & Layer Controller Panel */}
-      <div className="absolute top-12 right-2.5 z-30 pointer-events-auto">
-        <button className="absolute bottom-3 left-28 z-30 bg-slate-900 rounded border border-slate-700 px-2 py-1 text-[10px]" onClick={() => { const fitted=Math.max(1,Math.min(containerRef.current?.clientWidth??800,containerRef.current?.clientHeight??600)/((moonConfig?.physicalDistanceEarthRadii??60.3)*2.4)); setZoom(fitted); setPan({ x:-earthConfig.x*fitted,y:earthConfig.y*fitted }); }}>달 궤도 맞춤</button>
-        <VisualElementsGuidePanel
-          layerVisibility={currentLayers}
-          setLayerVisibility={updateLayers}
-        />
+        </div>
+
+        {/* Keep the expanded panel reachable even below several control rows. */}
+        <div className="min-h-0 max-w-full self-end overflow-y-auto overscroll-contain pointer-events-auto">
+          <VisualElementsGuidePanel
+            layerVisibility={currentLayers}
+            setLayerVisibility={updateLayers}
+          />
+        </div>
       </div>
 
       {/* Main Canvas Element */}

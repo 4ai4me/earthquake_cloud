@@ -78,11 +78,23 @@ export const MathFormulaCard: React.FC = () => {
             </div>
           </div>
 
-          {/* Section 3: Virtual Cloud Alignment & Crustal Stress */}
+          <div className="bg-[#14141b] p-2 rounded border border-[#1e1e24]">
+            <div className="font-medium text-slate-200 text-xs mb-0.5 flex items-center gap-1.5 font-mono">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+              3) 지구의 태양 중심 케플러 공전
+            </div>
+            <div className="overflow-x-auto py-0.5 text-center font-mono text-amber-200 text-[11px]">
+              <LatexRenderer math="M=E-e\sin E,\quad r=a(1-e\cos E)" displayMode />
+              <LatexRenderer math="v^2=\mu_\odot\left(\frac{2}{r}-\frac{1}{a}\right),\quad S/S_{1\,AU}=(1\,AU/r)^2" displayMode />
+              <div className="text-[10px] text-slate-400">태양계 AU 축척과 자기권 R_E 축척은 분리하며, 상대 복사량을 태양풍·IMF로 자동 변환하지 않습니다.</div>
+            </div>
+          </div>
+
+          {/* Section 4: Virtual Cloud Alignment & Crustal Stress */}
           <div className="bg-[#14141b] p-2 rounded border border-[#1e1e24]">
             <div className="font-medium text-slate-200 text-xs mb-0.5 flex items-center gap-1.5 font-mono">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-              3) 대기 입자 기준선과 자기 결합 가설
+              4) 대기 입자 기준선과 자기 결합 가설
             </div>
             <div className="overflow-x-auto py-0.5 text-center font-mono text-emerald-200 text-[11px]">
               <LatexRenderer math="m_p\dot{\mathbf v}=6\pi\eta a(\mathbf u-\mathbf v)+\mathbf F_{mag}+\mathbf F_h+\mathbf F_{turb}" displayMode />
@@ -91,11 +103,11 @@ export const MathFormulaCard: React.FC = () => {
             </div>
           </div>
 
-          {/* Section 4: Local Alignment Pattern (Sheep / Wave Clouds) */}
+          {/* Section 5: Local Alignment Pattern (Sheep / Wave Clouds) */}
           <div className="bg-[#14141b] p-2 rounded border border-[#1e1e24]">
             <div className="font-medium text-slate-200 text-xs mb-0.5 flex items-center gap-1.5 font-mono">
               <span className="w-1.5 h-1.5 rounded-full bg-sky-400" />
-              4) 반드시 가설: 지정된 주기적 구름 패턴 (자발적 생성 해 아님)
+              5) 반드시 가설: 지정된 주기적 구름 패턴 (자발적 생성 해 아님)
             </div>
             <div className="overflow-x-auto py-0.5 text-center font-mono text-sky-200 text-[11px] space-y-1">
               <LatexRenderer math="s=\frac{|\mathbf B_E\times\mathbf B_X|}{|\mathbf B_E||\mathbf B_X|},\quad q=\frac{|\mathbf B_X|}{|\mathbf B_E|+|\mathbf B_X|},\quad g=\tanh\left(\frac{L|\nabla B|}{B}\right)" displayMode />
@@ -109,7 +121,7 @@ export const MathFormulaCard: React.FC = () => {
           <div className="bg-[#14141b] p-2 rounded border border-[#1e1e24]">
             <div className="font-medium text-slate-200 text-xs mb-0.5 flex items-center gap-1.5 font-mono">
               <span className="w-1.5 h-1.5 rounded-full bg-red-400" />
-              5) 조석 섭동·합성 파열 규모
+              6) 조석 섭동·합성 파열 규모
             </div>
             <div className="overflow-x-auto py-0.5 text-center font-mono text-red-200 text-[11px]">
               <LatexRenderer math="\Delta\sigma_{tide}\propto d_M^{-3}\cos 2(\phi-\phi_M),\quad |\Delta\sigma_{tide}|\le 4\,\mathrm{kPa}" displayMode />
@@ -121,7 +133,7 @@ export const MathFormulaCard: React.FC = () => {
           <div className="bg-[#14141b] p-2 rounded border border-[#1e1e24]">
             <div className="font-medium text-slate-200 text-xs mb-0.5 flex items-center gap-1.5 font-mono">
               <span className="w-1.5 h-1.5 rounded-full bg-violet-400" />
-              6) CERN CLOUD 에어로졸 스크리닝 기준선
+              7) CERN CLOUD 에어로졸 스크리닝 기준선
             </div>
             <div className="overflow-x-auto py-0.5 text-center font-mono text-violet-200 text-[11px]">
               <LatexRenderer math="f_{surv}=e^{-CS\,t},\quad J^*=J_{SA-NH_3}+J_{SA-DMA}+J_{HIOx}+J_{IP-OOM}+J_{MSA}+J_{ion}" displayMode />

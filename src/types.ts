@@ -103,6 +103,17 @@ export interface GlobalWeatherData {
   modelSourceInfo?: string;
 }
 
+export interface EarthOrbitConfig {
+  enabled: boolean;
+  autoOrbit: boolean;
+  phaseAngleDeg: number; // mean anomaly measured from perihelion
+  daysPerSecond: number; // physical orbital days per display second
+  orbitalPeriodDays: number;
+  semiMajorAxisAu: number;
+  eccentricity: number;
+  axialTiltDeg: number;
+}
+
 export interface GroundObserverConfig {
   angleDeg: number; // 0 to 360 deg around Earth circle (0 = +X, 90 = +Y North, 180 = -X night, 270 = -Y South)
   label: string;
@@ -351,5 +362,16 @@ export const DEFAULT_CLOUD_CONFIG: AtmosphericCloudConfig = {
     hygroscopicityKappa: 0.3,
     coupleToCloudBaseline: false,
   },
+};
+
+export const DEFAULT_EARTH_ORBIT_CONFIG: EarthOrbitConfig = {
+  enabled: true,
+  autoOrbit: true,
+  phaseAngleDeg: 0,
+  daysPerSecond: 5,
+  orbitalPeriodDays: 365.256,
+  semiMajorAxisAu: 1,
+  eccentricity: 0.0167,
+  axialTiltDeg: 23.44,
 };
 

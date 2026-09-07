@@ -4,6 +4,7 @@ import { ResearchControls, ExternalSourcesControl, NumericInput } from './Resear
 import {
   AtmosphericCloudConfig,
   EarthDipoleConfig,
+  EarthOrbitConfig,
   EarthquakeEvent,
   ExternalMagneticSource,
   GlobalWeatherData,
@@ -12,12 +13,14 @@ import {
   SolarWindConfig,
   DEFAULT_CLOUD_CONFIG,
   DEFAULT_EARTH_DIPOLE,
+  DEFAULT_EARTH_ORBIT_CONFIG,
   DEFAULT_MOON_CONFIG,
   DEFAULT_SOLAR_WIND,
 } from '../types';
 import { CrustalStressManager } from '../physics/crustalStressEngine';
 import { EARTH_RADIUS_KM, computeSolarWindDynamicPressureNPa } from '../physics/physicsCalibration';
 import { computeWaveCloudDensity } from '../physics/magneticEngine';
+import { computeEarthOrbitState } from '../physics/earthOrbit';
 import { GlobalWeatherControl } from './GlobalWeatherControl';
 import { CernCloudAerosolControl } from './CernCloudAerosolControl';
 import {
@@ -58,6 +61,8 @@ interface PhysicsControlsProps {
   setSolarWind: React.Dispatch<React.SetStateAction<SolarWindConfig>>;
   moonConfig?: MoonConfig;
   setMoonConfig?: React.Dispatch<React.SetStateAction<MoonConfig>>;
+  earthOrbitConfig: EarthOrbitConfig;
+  setEarthOrbitConfig: React.Dispatch<React.SetStateAction<EarthOrbitConfig>>;
   cloudConfig: AtmosphericCloudConfig;
   setCloudConfig: React.Dispatch<React.SetStateAction<AtmosphericCloudConfig>>;
   stressManager: CrustalStressManager;
@@ -66,8 +71,8 @@ interface PhysicsControlsProps {
   onEarthquakeTriggered?: (event: EarthquakeEvent) => void;
   onApplyPreset: (presetKey: string) => void;
   onResetSimulation?: () => void;
-  activeTab: 'earth' | 'moon' | 'sources' | 'solar' | 'cloud' | 'aerosol' | 'stress' | 'presets' | 'weather';
-  setActiveTab: (tab: 'earth' | 'moon' | 'sources' | 'solar' | 'cloud' | 'aerosol' | 'stress' | 'presets' | 'weather') => void;
+  activeTab: 'earth' | 'orbit' | 'moon' | 'sources' | 'solar' | 'cloud' | 'aerosol' | 'stress' | 'presets' | 'weather';
+  setActiveTab: (tab: 'earth' | 'orbit' | 'moon' | 'sources' | 'solar' | 'cloud' | 'aerosol' | 'stress' | 'presets' | 'weather') => void;
 }
 
 export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
@@ -80,6 +85,8 @@ export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
   setSolarWind,
   moonConfig = DEFAULT_MOON_CONFIG,
   setMoonConfig,
+  earthOrbitConfig,
+  setEarthOrbitConfig,
   cloudConfig,
   setCloudConfig,
   stressManager,
@@ -140,6 +147,10 @@ export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
     setCloudConfig((prev) => ({ ...DEFAULT_CLOUD_CONFIG, weatherData: prev.weatherData }));
   };
 
+  const handleResetEarthOrbit = () => {
+    setEarthOrbitConfig({ ...DEFAULT_EARTH_ORBIT_CONFIG });
+  };
+
   return (
     <div className="bg-[#0f0f13] border border-[#1e1e24] rounded-lg shadow-2xl flex min-h-0 flex-col text-slate-200 overflow-hidden lg:h-[calc(100vh-5.5rem)] lg:min-h-[32rem] lg:max-h-[calc(100vh-5.5rem)]">
       {/* All condition categories stay visible; the selected panel scrolls independently. */}
@@ -191,6 +202,22 @@ export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
         >
           <Moon className="w-3.5 h-3.5 text-slate-300" />
           <span className="truncate">달</span>
+        </button>
+        <button
+          id="tab-orbit"
+          role="tab"
+          aria-selected={activeTab === 'orbit'}
+          aria-controls="physics-tab-panel"
+          title="지구의 태양 공전"
+          onClick={() => setActiveTab('orbit')}
+          className={`min-w-0 px-2 py-2 text-[11px] font-mono rounded transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap ${
+            activeTab === 'orbit'
+              ? 'bg-[#181824] text-amber-300 border border-amber-500/40 shadow-sm font-semibold'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-[#14141c]'
+          }`}
+        >
+          <Orbit className="w-3.5 h-3.5 text-amber-400" />
+          <span className="truncate">태양 공전</span>
         </button>
         <button
           id="tab-sources"
@@ -319,7 +346,7 @@ export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
                     <span>시뮬레이션 전체 리셋 (Master Reset)</span>
                   </div>
                   <div className="text-[10px] text-slate-400 mt-0.5">
-                    모든 외부 자극원 및 혜성을 제거하고 지구 쌍극자·달·태양풍·지진운을 평온(Default) 상태로 일괄 초기화합니다.
+                    모든 외부 자극원 및 혜성을 제거하고 지구 쌍극자·태양 공전·달·태양풍·지진운을 평온(Default) 상태로 일괄 초기화합니다.
                   </div>
                 </div>
                 <button
@@ -529,6 +556,30 @@ export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
             <button onClick={handleResetMoonNormal} className="border rounded p-2">달 기본값 복원</button>
           </div>
         )}
+
+        {activeTab === 'orbit' && (() => {
+          const orbit = computeEarthOrbitState(earthOrbitConfig);
+          return (
+            <div className="space-y-3">
+              <div className="rounded-md border border-amber-500/30 bg-amber-950/20 p-3">
+                <h3 className="flex items-center gap-2 font-semibold text-amber-200"><Sun className="h-4 w-4"/>지구 · 태양 중심 타원 공전</h3>
+                <p className="mt-1 text-[10px] leading-relaxed text-slate-300">태양을 한 초점으로 하는 케플러 궤도입니다. 1 AU 태양계 축척과 R_E 자기권 축척을 분리하며, 공전만으로 지구 자기장을 임의로 흔들지 않습니다.</p>
+              </div>
+              <label className="flex gap-2"><input type="checkbox" checked={earthOrbitConfig.enabled} onChange={event => setEarthOrbitConfig(previous => ({ ...previous, enabled: event.target.checked }))}/>태양 공전 시뮬레이션 활성</label>
+              <label className="flex gap-2"><input type="checkbox" checked={earthOrbitConfig.autoOrbit} onChange={event => setEarthOrbitConfig(previous => ({ ...previous, autoOrbit: event.target.checked }))}/>공전 진행</label>
+              <NumericInput label="평균근점이각 M (°, 0=근일점)" value={earthOrbitConfig.phaseAngleDeg} onChange={phaseAngleDeg => setEarthOrbitConfig(previous => ({ ...previous, phaseAngleDeg: ((phaseAngleDeg % 360) + 360) % 360 }))}/>
+              <NumericInput label="시간 배율 (실제 일 / 화면 초)" value={earthOrbitConfig.daysPerSecond} min={0} max={3652.56} onChange={daysPerSecond => setEarthOrbitConfig(previous => ({ ...previous, daysPerSecond }))}/>
+              <div className="grid grid-cols-2 gap-2 rounded border border-slate-800 bg-slate-950/50 p-2 font-mono text-[10px]">
+                <span>태양 중심 거리</span><strong className="text-cyan-200">{orbit.distanceAu.toFixed(5)} AU</strong>
+                <span>거리</span><strong>{(orbit.distanceKm / 1_000_000).toFixed(3)} 백만 km</strong>
+                <span>공전 속도</span><strong>{orbit.orbitalSpeedKmS.toFixed(2)} km/s</strong>
+                <span>1 AU 대비 복사량</span><strong>{orbit.solarFluxRatio.toFixed(4)} ×</strong>
+              </div>
+              <p className="text-[10px] text-slate-400">기준값: 장반경 1 AU, 이심률 0.0167, 항성주기 365.256일, 자전축 경사 {earthOrbitConfig.axialTiltDeg}°. 거리 역제곱은 태양 복사량에만 적용하며 태양풍/IMF 값은 별도 입력입니다.</p>
+              <button type="button" onClick={handleResetEarthOrbit} className="rounded border border-amber-700 px-3 py-2 text-amber-200"><RotateCcw className="mr-1 inline h-3 w-3"/>태양 공전 기본값 복원</button>
+            </div>
+          );
+        })()}
 
         {activeTab === 'sources' && <ExternalSourcesControl sources={sources} setSources={setSources} earth={earthConfig} />}
 

@@ -20,6 +20,8 @@ export const REFERENCES: Record<string,{ title:string; url:string; use:string }>
   mw:{title:'Kanamori (1977), The energy release in great earthquakes',url:'https://doi.org/10.1029/JB082i020p02981',use:'지진모멘트와 모멘트 규모의 배경. 합성 입력으로 얻은 Mw는 관측 규모가 아님.'},
   droplet:{title:'Guo & Xue (2021), The enhancement of droplet collision by electric charges and atmospheric electric fields',url:'https://doi.org/10.5194/acp-21-69-2021',use:'하전 물방울과 전기장 효과. 자기장만으로 지진운이 만들어진다는 근거가 아님.'},
   magnetophoresis:{title:'Suwa et al. (2023), Applications of magnetic and electromagnetic forces in micro-analytical systems',url:'https://doi.org/10.1039/D2LC00702A',use:'자기력·입자 힘과 유체 항력 배경. 대기 물방울의 강한 자기 정렬을 보장하지 않음.'},
+  earthOrbit:{title:'NASA/JPL — Earth: Facts & Figures',url:'https://www.jpl.nasa.gov/edu/pdfs/ss_earth.pdf',use:'지구의 평균 태양 거리 1 AU, 공전 주기 약 365.26일, 자전축 경사 기준값.'},
+  seasons:{title:'NASA Science — Milankovitch Cycles',url:'https://science.nasa.gov/science-research/earth-science/milankovitch-orbital-cycles-and-their-role-in-earths-climate/',use:'현재 지구 궤도 이심률과 거리 변화, 자전축 경사·계절 해석의 배경.'},
 };
 
 // Entries group aliases used in controls, formulas, legends and exported diagnostics.
@@ -46,6 +48,8 @@ export const KNOWLEDGE: KnowledgeItem[] = [
   item('Bow shock 활모양 충격파 · 재결합 reconnection · X-point 중성점','우주환경','물리 근사','태양풍 충격파와 자기권계면은 서로 다른 면이다. 자기장 영점은 재결합 후보 구조와 관련될 수 있다.','정자기 영점 탐지만으로 재결합률·입자 가열·에너지 유입을 계산한 것이 아니다. 이전 고정 원뿔 Bow Shock 표시는 제거했다.'),
   item('밴앨런대 · 방사선대 · 오로라 · 전리층 열권 중간권','우주환경','기초 이론','자기권 입자 포획 영역, 극지 발광 현상, 전리된 대기와 고도별 대기층을 뜻한다.','앱의 광륜·입자·펄스는 해당 현상을 정량적으로 해석한 결과가 아니다.'),
   item('달 공전 · 자전 · 위상 phase · 삭 망 상현 하현 · 동주기','달','관측 기반','대표 거리 60.3 R_E, 항성 공전 주기 27.32일. 자전 방향 표시를 공전 위상에 동기화한다. 실제 일/화면 초 배율이 2D·3D에 공통 적용된다.','원궤도·일정 주기 근사이며 이심률·경사·삭망월과 항성월 차이를 정밀 계산하지 않는다.',['nasaMoon']),
+  item('지구 태양 공전 · AU · 케플러 방정식 · 평균근점이각 M · 이심률 e','태양계','관측 기반','태양을 한 초점으로 하는 타원 궤도에서 M=E−e sin(E)를 풀어 위치를 구한다. 기본 장반경 1 AU, 이심률 0.0167, 항성주기 365.256일이며 위상 0°는 근일점이다.','1 AU 태양계 화면과 R_E 자기권 화면은 축척이 다르다. 위상은 달의 삭·망 같은 광학 위상이 아니며 행성 섭동·세차는 계산하지 않는다.',['earthOrbit','seasons']),
+  item('태양–지구 거리 · 근일점 · 원일점 · 공전 속도 · vis-viva · 복사량 r⁻²','태양계','물리 근사','거리와 속도는 타원 궤도 및 vis-viva 식 v²=μ(2/r−1/a)로 계산한다. 1 AU 대비 태양 복사량 표시는 1/r² 파생값이다.','복사량 비가 태양풍 동압·IMF 또는 자기권 변형으로 자동 변환되지는 않는다. 공전만으로 지구 자기장이 크게 출렁이는 효과를 만들지 않는다.',['earthOrbit','seasons']),
   item('달 잔류자기 · remanentMoment · 국소 지각 자기장 · 나침반','달','관측 기반','달에는 지구 같은 확인된 전역 자기장이 없고 국소 자기 이상이 있다. 지구 나침반처럼 일관된 자기 북쪽을 기대할 수 없다.','국소 달 자기장 지도는 현재 불러오지 않는다. 전역 쌍극자 기본 OFF는 국소장이 없다는 뜻이 아니다.',['nasaMoon']),
   item('달 전역 쌍극자 · hypothesisDipoleEnabled · m_M','달','반드시 가설','이전 전역 달 쌍극자는 선택적인 가설 모드로 분리했다. 실제 거리와 동주기 방향을 사용한다.','관측된 달의 전역 자기 모멘트가 아니며 기본값은 OFF/0.',['nasaMoon']),
   item('조석 tide · tidalStressWeight · 기조력 · tidal bulge','달','물리 근사','가역적 사중극 형태 응력∝d⁻³ cos(2Δθ), 대표 최대 4 kPa로 보정한다.','조석 섭동을 판구조 하중처럼 계속 누적하지 않는다. 과장된 지구 팽창 그림은 기본 OFF. 해양·전리층 자기 조석은 미계산.',['tide','ocean']),

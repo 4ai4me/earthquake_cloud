@@ -2,6 +2,7 @@ import React, { Suspense, lazy, useState, useMemo, useCallback, useEffect, useRe
 import {
   AtmosphericCloudConfig,
   EarthDipoleConfig,
+  EarthOrbitConfig,
   EarthquakeEvent,
   ExternalMagneticSource,
   GlobalWeatherData,
@@ -12,11 +13,13 @@ import {
   SolarWindConfig,
   DEFAULT_CLOUD_CONFIG,
   DEFAULT_EARTH_DIPOLE,
+  DEFAULT_EARTH_ORBIT_CONFIG,
   DEFAULT_MOON_CONFIG,
   DEFAULT_SOLAR_WIND,
 } from './types';
 import { CloudParticleSystem } from './physics/cloudParticleEngine';
 import { advanceMoon, advanceSource, DEFAULT_RESEARCH, ResearchConfig, needsLogOnly } from './physics/fieldModel';
+import { advanceEarthOrbit, computeEarthOrbitState } from './physics/earthOrbit';
 import { KnowledgePage } from './components/KnowledgePage';
 import { CrustalStressManager } from './physics/crustalStressEngine';
 import { GLOBAL_WEATHER_PRESETS } from './physics/weatherEngine';
@@ -24,6 +27,7 @@ import { SimulationCanvas2D } from './components/SimulationCanvas2D';
 import { DEFAULT_LAYER_VISIBILITY } from './components/VisualElementsGuidePanel';
 import { PhysicsControls } from './components/PhysicsControls';
 import { MathFormulaCard } from './components/MathFormulaCard';
+import { SolarOrbitView } from './components/SolarOrbitView';
 import {
   Activity,
   AlertOctagon,
@@ -37,6 +41,7 @@ import {
   Maximize2,
   Minimize2,
   Moon,
+  Orbit,
   Radio,
   RotateCcw,
   Sliders,
@@ -80,27 +85,30 @@ export default function App() {
   // 5. Lunar Satellite & Tidal Physics Configuration
   const [moonConfig, setMoonConfig] = useState<MoonConfig>({ ...DEFAULT_MOON_CONFIG });
 
-  // 6. Atmospheric Cloud Particle Model Configuration ("가상 지진운")
+  // 6. Heliocentric Earth Orbit (kept separate from the R_E magnetosphere scale)
+  const [earthOrbitConfig, setEarthOrbitConfig] = useState<EarthOrbitConfig>({ ...DEFAULT_EARTH_ORBIT_CONFIG });
+
+  // 7. Atmospheric Cloud Particle Model Configuration ("가상 지진운")
   const [cloudConfig, setCloudConfig] = useState<AtmosphericCloudConfig>(createDefaultCloudConfig);
 
-  // 7. Physics Engines Instances
+  // 8. Physics Engines Instances
   const stressManager = useMemo(() => new CrustalStressManager(48), []);
   const particleSystem = useMemo(() => new CloudParticleSystem(500), []);
 
-  // 8. View & UI State
+  // 9. View & UI State
   const [research, setResearch] = useState<ResearchConfig>({ ...DEFAULT_RESEARCH });
   const [isPlaying, setIsPlaying] = useState(true);
   const [knowledgeOpen, setKnowledgeOpen] = useState(false);
   const closeKnowledge = useCallback(() => setKnowledgeOpen(false), []);
   const closePython = useCallback(() => setIsPythonModalOpen(false), []);
-  const [viewMode, setViewMode] = useState<'2D' | '3D' | 'split'>('2D');
+  const [viewMode, setViewMode] = useState<'2D' | '3D' | 'split' | 'orbit'>('2D');
   const [renderMode, setRenderMode] = useState<RenderMode>('composite');
   const [heatmapMetric, setHeatmapMetric] = useState<HeatmapMetric>('magnitude');
   const [showNeutralPoints, setShowNeutralPoints] = useState<boolean>(true);
   const [streamlineDensity, setStreamlineDensity] = useState<number>(28);
   const [layerVisibility, setLayerVisibility] = useState<LayerVisibilityConfig>(DEFAULT_LAYER_VISIBILITY);
 
-  const [activeControlTab, setActiveControlTab] = useState<'earth' | 'sources' | 'solar' | 'cloud' | 'aerosol' | 'moon' | 'stress' | 'presets' | 'weather'>('presets');
+  const [activeControlTab, setActiveControlTab] = useState<'earth' | 'orbit' | 'sources' | 'solar' | 'cloud' | 'aerosol' | 'moon' | 'stress' | 'presets' | 'weather'>('presets');
   const [isPythonModalOpen, setIsPythonModalOpen] = useState<boolean>(false);
   const [latestEarthquake, setLatestEarthquake] = useState<EarthquakeEvent | null>(null);
   const simulationViewportRef = useRef<HTMLDivElement | null>(null);
@@ -148,8 +156,8 @@ export default function App() {
     }, 6000);
   }, []);
 
-  const clockState = useRef({ isPlaying, earthConfig, sources, solarWind, moonConfig, cloudConfig });
-  clockState.current = { isPlaying, earthConfig, sources, solarWind, moonConfig, cloudConfig };
+  const clockState = useRef({ isPlaying, earthConfig, earthOrbitConfig, sources, solarWind, moonConfig, cloudConfig });
+  clockState.current = { isPlaying, earthConfig, earthOrbitConfig, sources, solarWind, moonConfig, cloudConfig };
   useEffect(() => {
     let last = performance.now();
     const timer = window.setInterval(() => {
@@ -157,6 +165,7 @@ export default function App() {
       const state = clockState.current;
       if (!state.isPlaying || document.hidden) return;
       setMoonConfig(prev => advanceMoon(prev, dt));
+      setEarthOrbitConfig(prev => advanceEarthOrbit(prev, dt));
       setSources(prev => {
         let changed = false;
         const next = prev.map(source => {
@@ -354,6 +363,7 @@ export default function App() {
     setSources([]); // 모든 외부 자극원 제거
     setSolarWind({ ...DEFAULT_SOLAR_WIND }); // 외부 태양풍 자극 비활성화
     setMoonConfig({ ...DEFAULT_MOON_CONFIG }); // 달 정상 궤도 기본값 복원
+    setEarthOrbitConfig({ ...DEFAULT_EARTH_ORBIT_CONFIG });
     setCloudConfig(createDefaultCloudConfig());
     setWeatherData(GLOBAL_WEATHER_PRESETS[0].data); // 기본 대한민국 수원 기상데이터 복원
 
@@ -455,6 +465,19 @@ export default function App() {
             >
               <Maximize2 className="w-3.5 h-3.5" />
               분할 뷰
+            </button>
+            <button
+              id="view-mode-orbit"
+              aria-pressed={viewMode === 'orbit'}
+              onClick={() => { setViewMode('orbit'); setActiveControlTab('orbit'); }}
+              className={`px-2.5 py-1 rounded transition-colors flex items-center gap-1.5 text-xs ${
+                viewMode === 'orbit'
+                  ? 'bg-[#181822] text-amber-300 border border-[#2c2c3e] shadow-sm font-semibold'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Orbit className="w-3.5 h-3.5" />
+              <span>태양 공전</span>
             </button>
           </div>
 
@@ -568,6 +591,17 @@ export default function App() {
               </div>
             )}
 
+            {viewMode === 'orbit' && (
+              <SolarOrbitView config={earthOrbitConfig} isPlaying={isPlaying} setIsPlaying={setIsPlaying} />
+            )}
+
+            {viewMode !== 'orbit' && earthOrbitConfig.enabled && (() => {
+              const orbit = computeEarthOrbitState(earthOrbitConfig);
+              return <div data-testid="earth-orbit-status" className="pointer-events-none absolute bottom-3 left-1/2 z-40 -translate-x-1/2 rounded border border-amber-700/50 bg-slate-950/90 px-2 py-1 text-[10px] font-mono text-amber-100 shadow-lg">
+                태양 공전 M {earthOrbitConfig.phaseAngleDeg.toFixed(1)}° · {orbit.distanceAu.toFixed(4)} AU · {orbit.orbitalSpeedKmS.toFixed(1)} km/s
+              </div>;
+            })()}
+
             <button
               id="btn-simulation-fullscreen"
               type="button"
@@ -605,6 +639,8 @@ export default function App() {
             setSolarWind={setSolarWind}
             moonConfig={moonConfig}
             setMoonConfig={setMoonConfig}
+            earthOrbitConfig={earthOrbitConfig}
+            setEarthOrbitConfig={setEarthOrbitConfig}
             cloudConfig={cloudConfig}
             setCloudConfig={setCloudConfig}
             stressManager={stressManager}

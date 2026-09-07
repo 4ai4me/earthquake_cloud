@@ -132,4 +132,3 @@ GitHub Pages는 정적 파일만 제공하므로 Gemini 비밀키를 안전하�
 
 ## 📜 라이선스 (License)
 MIT License. 자유롭게 연구, 교육 및 시뮬레이션 용도로 활용하실 수 있습니다.
-

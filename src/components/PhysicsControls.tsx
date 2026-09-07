@@ -20,7 +20,7 @@ import {
 import { CrustalStressManager } from '../physics/crustalStressEngine';
 import { EARTH_RADIUS_KM, computeSolarWindDynamicPressureNPa } from '../physics/physicsCalibration';
 import { computeWaveCloudDensity } from '../physics/magneticEngine';
-import { computeEarthOrbitState } from '../physics/earthOrbit';
+import { computeEarthOrbitState, computeSunEarthCoupling } from '../physics/earthOrbit';
 import { GlobalWeatherControl } from './GlobalWeatherControl';
 import { CernCloudAerosolControl } from './CernCloudAerosolControl';
 import {
@@ -559,23 +559,30 @@ export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
 
         {activeTab === 'orbit' && (() => {
           const orbit = computeEarthOrbitState(earthOrbitConfig);
+          const coupling = computeSunEarthCoupling(earthOrbitConfig, earthConfig, solarWind);
           return (
             <div className="space-y-3">
               <div className="rounded-md border border-amber-500/30 bg-amber-950/20 p-3">
                 <h3 className="flex items-center gap-2 font-semibold text-amber-200"><Sun className="h-4 w-4"/>지구 · 태양 중심 타원 공전</h3>
-                <p className="mt-1 text-[10px] leading-relaxed text-slate-300">태양을 한 초점으로 하는 케플러 궤도입니다. 1 AU 태양계 축척과 R_E 자기권 축척을 분리하며, 공전만으로 지구 자기장을 임의로 흔들지 않습니다.</p>
+                <p className="mt-1 text-[10px] leading-relaxed text-slate-300">태양을 한 초점으로 하는 케플러 궤도입니다. 자전·공전 연동은 태양 방향, 쌍극축의 2D 투영과 정상상태 태양풍 동압의 거리 희석만 계산하며 완전한 3D MHD가 아닙니다.</p>
               </div>
               <label className="flex gap-2"><input type="checkbox" checked={earthOrbitConfig.enabled} onChange={event => setEarthOrbitConfig(previous => ({ ...previous, enabled: event.target.checked }))}/>태양 공전 시뮬레이션 활성</label>
               <label className="flex gap-2"><input type="checkbox" checked={earthOrbitConfig.autoOrbit} onChange={event => setEarthOrbitConfig(previous => ({ ...previous, autoOrbit: event.target.checked }))}/>공전 진행</label>
+              <label className="flex gap-2 text-cyan-200"><input type="checkbox" checked={earthOrbitConfig.couplingEnabled} onChange={event => setEarthOrbitConfig(previous => ({ ...previous, couplingEnabled: event.target.checked }))}/>자전·공전 → 2D/3D 자기권 연동</label>
               <NumericInput label="평균근점이각 M (°, 0=근일점)" value={earthOrbitConfig.phaseAngleDeg} onChange={phaseAngleDeg => setEarthOrbitConfig(previous => ({ ...previous, phaseAngleDeg: ((phaseAngleDeg % 360) + 360) % 360 }))}/>
+              <NumericInput label="지구 자전 위상 (°)" value={earthOrbitConfig.rotationPhaseDeg} onChange={rotationPhaseDeg => setEarthOrbitConfig(previous => ({ ...previous, rotationPhaseDeg: ((rotationPhaseDeg % 360) + 360) % 360 }))}/>
+              <NumericInput label="항성 자전 주기 (시간)" value={earthOrbitConfig.rotationPeriodHours} min={0.01} max={2400} onChange={rotationPeriodHours => setEarthOrbitConfig(previous => ({ ...previous, rotationPeriodHours }))}/>
               <NumericInput label="시간 배율 (실제 일 / 화면 초)" value={earthOrbitConfig.daysPerSecond} min={0} max={3652.56} onChange={daysPerSecond => setEarthOrbitConfig(previous => ({ ...previous, daysPerSecond }))}/>
               <div className="grid grid-cols-2 gap-2 rounded border border-slate-800 bg-slate-950/50 p-2 font-mono text-[10px]">
                 <span>태양 중심 거리</span><strong className="text-cyan-200">{orbit.distanceAu.toFixed(5)} AU</strong>
                 <span>거리</span><strong>{(orbit.distanceKm / 1_000_000).toFixed(3)} 백만 km</strong>
                 <span>공전 속도</span><strong>{orbit.orbitalSpeedKmS.toFixed(2)} km/s</strong>
                 <span>1 AU 대비 복사량</span><strong>{orbit.solarFluxRatio.toFixed(4)} ×</strong>
+                <span>태양풍 진행 방향</span><strong className="text-amber-200">{coupling.solarWindFlowAngleDeg.toFixed(1)}°</strong>
+                <span>동압 거리 배율</span><strong className="text-amber-200">{coupling.solarWindPressureRatio.toFixed(4)} ×</strong>
+                <span>쌍극축 투영각</span><strong className="text-purple-200">{coupling.projectedDipoleAngleDeg.toFixed(1)}°</strong>
               </div>
-              <p className="text-[10px] text-slate-400">기준값: 장반경 1 AU, 이심률 0.0167, 항성주기 365.256일, 자전축 경사 {earthOrbitConfig.axialTiltDeg}°. 거리 역제곱은 태양 복사량에만 적용하며 태양풍/IMF 값은 별도 입력입니다.</p>
+              <p className="text-[10px] text-slate-400">기준값: 장반경 1 AU, 이심률 0.0167, 항성주기 365.256일, 항성 자전 23.934 h, 자전축 경사 {earthOrbitConfig.axialTiltDeg}°. 태양풍이 OFF면 방향·동압 파생값은 표시만 하고 자기권에는 적용하지 않습니다. 순간 속도·IMF/CME는 별도 입력입니다.</p>
               <button type="button" onClick={handleResetEarthOrbit} className="rounded border border-amber-700 px-3 py-2 text-amber-200"><RotateCcw className="mr-1 inline h-3 w-3"/>태양 공전 기본값 복원</button>
             </div>
           );
@@ -646,6 +653,9 @@ export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
                 <span className="text-amber-300 font-bold">1.34 (400 km/s, 5 cm⁻³)</span>
                 <span>4.5 (강력한 폭풍압축)</span>
               </div>
+              {earthOrbitConfig.enabled && earthOrbitConfig.couplingEnabled && (
+                <p className="mt-1.5 text-[10px] text-cyan-300">자전·공전 연동 중: 이 동압은 1 AU 기준값으로 보존되며, 현재 거리의 r⁻² 배율은 파생 상태에만 적용됩니다.</p>
+              )}
               {solarWind.speedKmS !== undefined && solarWind.densityCm3 !== undefined && (
                 <div className="text-[10px] text-slate-400 mt-1.5">
                   수신값 ρv²: {solarWind.densityCm3.toFixed(2)} cm⁻³ × {solarWind.speedKmS.toFixed(0)} km/s →{' '}

@@ -86,7 +86,8 @@ export const MathFormulaCard: React.FC = () => {
             <div className="overflow-x-auto py-0.5 text-center font-mono text-amber-200 text-[11px]">
               <LatexRenderer math="M=E-e\sin E,\quad r=a(1-e\cos E)" displayMode />
               <LatexRenderer math="v^2=\mu_\odot\left(\frac{2}{r}-\frac{1}{a}\right),\quad S/S_{1\,AU}=(1\,AU/r)^2" displayMode />
-              <div className="text-[10px] text-slate-400">태양계 AU 축척과 자기권 R_E 축척은 분리하며, 상대 복사량을 태양풍·IMF로 자동 변환하지 않습니다.</div>
+              <LatexRenderer math="P_{dyn}(r)=P_{dyn,1AU}(1\,AU/r)^2,\quad T_{sidereal}=23.934\,h" displayMode />
+              <div className="text-[10px] text-slate-400">2D/3D는 태양 방향·쌍극축 평면 투영·정상상태 동압 배율을 공유합니다. 순간 태양풍·IMF/CME를 공전으로 예측하는 식은 아닙니다.</div>
             </div>
           </div>
 

@@ -1,4 +1,4 @@
-import { EarthOrbitConfig } from '../types';
+import { EarthDipoleConfig, EarthOrbitConfig, SolarWindConfig } from '../types';
 
 export const ASTRONOMICAL_UNIT_KM = 149_597_870.7;
 const SOLAR_GRAVITATIONAL_PARAMETER_KM3_S2 = 132_712_440_018;
@@ -11,6 +11,14 @@ export interface EarthOrbitState {
   trueAnomalyDeg: number;
   orbitalSpeedKmS: number;
   solarFluxRatio: number;
+}
+
+export interface SunEarthCouplingState {
+  earth: EarthDipoleConfig;
+  solarWind: SolarWindConfig;
+  solarWindFlowAngleDeg: number;
+  solarWindPressureRatio: number;
+  projectedDipoleAngleDeg: number;
 }
 
 const normalizeDegrees = (degrees: number) => ((degrees % 360) + 360) % 360;
@@ -61,5 +69,51 @@ export function advanceEarthOrbit(config: EarthOrbitConfig, seconds: number): Ea
   return {
     ...config,
     phaseAngleDeg: normalizeDegrees(config.phaseAngleDeg + 360 * days / Math.max(0.01, config.orbitalPeriodDays)),
+    rotationPhaseDeg: normalizeDegrees((config.rotationPhaseDeg ?? 0) + 360 * days * 24 / Math.max(0.01, config.rotationPeriodHours ?? 23.9344696)),
+  };
+}
+
+/**
+ * Projects Sun-Earth geometry into the app's shared x-y slice.
+ * The solar-wind pressure correction assumes a steady radial flow: density and
+ * therefore ram pressure dilute as r^-2 while the user-provided speed/IMF stay
+ * untouched. This is a visual/diagnostic coupling, not a global MHD solution.
+ */
+export function computeSunEarthCoupling(
+  config: EarthOrbitConfig,
+  earth: EarthDipoleConfig,
+  solarWind: SolarWindConfig,
+): SunEarthCouplingState {
+  if (!config.enabled || config.couplingEnabled === false) {
+    return {
+      earth,
+      solarWind,
+      solarWindFlowAngleDeg: solarWind.flowAngleDeg ?? 0,
+      solarWindPressureRatio: 1,
+      projectedDipoleAngleDeg: earth.tiltAngle,
+    };
+  }
+
+  const orbit = computeEarthOrbitState(config);
+  const rotationPhaseRad = normalizeDegrees(config.rotationPhaseDeg ?? 0) * Math.PI / 180;
+  // Ecliptic-plane projection: fixed spin-axis obliquity plus the rotating
+  // geomagnetic-axis offset configured by the user.
+  const projectedDipoleAngleDeg = Math.max(-89.9, Math.min(
+    89.9,
+    config.axialTiltDeg + earth.tiltAngle * Math.cos(rotationPhaseRad),
+  ));
+  const solarWindFlowAngleDeg = orbit.trueAnomalyDeg;
+  const solarWindPressureRatio = orbit.solarFluxRatio;
+
+  return {
+    earth: { ...earth, tiltAngle: projectedDipoleAngleDeg },
+    solarWind: {
+      ...solarWind,
+      pressure: solarWind.pressure * solarWindPressureRatio,
+      flowAngleDeg: solarWindFlowAngleDeg,
+    },
+    solarWindFlowAngleDeg,
+    solarWindPressureRatio,
+    projectedDipoleAngleDeg,
   };
 }

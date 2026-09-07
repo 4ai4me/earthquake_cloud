@@ -65,6 +65,18 @@ test('field gradient fading and weak contour are distinct from a zero boundary',
   assert.equal(magnetopausePoint(0,0,base),null);
   assert.equal(magnetopausePoint(0,0,{...base,solar:{...base.solar,enabled:true,imfBz:1000}}),null);
 });
+test('solar-wind direction rotates the IMF slice and magnetopause consistently',()=>{
+  const solar0={...base.solar,enabled:true,pressure:2,imfBx:3,imfBz:0,flowAngleDeg:0};
+  const solar90={...solar0,flowAngleDeg:90};
+  const field0=externalField({x:0,y:0,z:0},{...base,solar:solar0});
+  const field90=externalField({x:0,y:0,z:0},{...base,solar:solar90});
+  assert.ok(Math.abs(field0.x-1)<1e-12&&Math.abs(field0.y)<1e-12);
+  assert.ok(Math.abs(field90.x)<1e-12&&Math.abs(field90.y-1)<1e-12);
+  const nose0=magnetopausePoint(0,0,{...base,solar:solar0})!;
+  const nose90=magnetopausePoint(0,0,{...base,solar:solar90})!;
+  assert.ok(nose0.x<base.earth.x&&Math.abs(nose0.y-base.earth.y)<1e-9);
+  assert.ok(nose90.y<base.earth.y&&Math.abs(nose90.x-base.earth.x)<1e-9);
+});
 test('core coupling OFF and zero transmission preserve the null control even for infinity',()=>{
   const context={...base,sources:[{...source,type:'uniform' as const,fieldNt:'∞'}]};
   assert.equal(coreResponse(context,DEFAULT_RESEARCH).delta,0);

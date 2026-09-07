@@ -60,6 +60,7 @@ export interface SolarWindConfig {
   speedKmS?: number; // measured/assumed bulk speed used for dynamic-pressure calculation
   densityCm3?: number; // measured/assumed proton density used for dynamic-pressure calculation
   fieldVisualizationGain?: number; // legacy only; shared field ignores this amplification
+  flowAngleDeg?: number; // solar-wind propagation direction in the simulation x-y plane (0 = +X)
 }
 
 export type InspectionViewMode = 'none' | 'cloud_density' | 'hotspot_mask' | 'cloud_vector_overlay' | 'split_3view';
@@ -106,7 +107,10 @@ export interface GlobalWeatherData {
 export interface EarthOrbitConfig {
   enabled: boolean;
   autoOrbit: boolean;
+  couplingEnabled: boolean; // derive the shared Sun-Earth geometry without overwriting user inputs
   phaseAngleDeg: number; // mean anomaly measured from perihelion
+  rotationPhaseDeg: number; // Earth sidereal rotation phase
+  rotationPeriodHours: number;
   daysPerSecond: number; // physical orbital days per display second
   orbitalPeriodDays: number;
   semiMajorAxisAu: number;
@@ -367,7 +371,10 @@ export const DEFAULT_CLOUD_CONFIG: AtmosphericCloudConfig = {
 export const DEFAULT_EARTH_ORBIT_CONFIG: EarthOrbitConfig = {
   enabled: true,
   autoOrbit: true,
+  couplingEnabled: true,
   phaseAngleDeg: 0,
+  rotationPhaseDeg: 0,
+  rotationPeriodHours: 23.9344696,
   daysPerSecond: 5,
   orbitalPeriodDays: 365.256,
   semiMajorAxisAu: 1,

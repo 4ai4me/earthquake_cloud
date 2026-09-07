@@ -19,11 +19,11 @@ String input preserves large exponents without a fabricated nT ceiling. Above 1e
 
 Moon geometry uses the physical distance 60.3 R_E. Baseline global lunar dipole is zero; an optional whole-Moon dipole is explicitly hypothetical. Local anomalies, wake plasma and ocean/ionospheric tidal currents are not solved. Atmospheric/fault magnetic diagnostics exclude that optional lunar dipole; magnetic geometry includes it.
 
-The heliocentric Earth view is deliberately separate from the Earth-centred R_E field view. It solves Kepler's equation `M=E-e sin(E)` with defaults `a=1 AU`, `e=0.0167`, and `T=365.256 days`, then derives speed from `v²=mu_sun(2/r-1/a)`. The displayed irradiance ratio is `(1 AU/r)²`. It does not automatically alter the user-specified solar-wind pressure or IMF, and orbit alone does not deform the magnetic field model.
+The heliocentric AU scale remains numerically separate from the Earth-centred R_E field scale. The orbit solves `M=E-e sin(E)` with `a=1 AU`, `e=0.0167`, and `T=365.256 days`; speed follows `v²=mu_sun(2/r-1/a)`. A shared 23.934-hour sidereal clock advances Earth rotation. When coupling is enabled, both field views use the orbital Sun direction, an ecliptic-slice projection of the 23.44-degree spin-axis obliquity plus the rotating configured geomagnetic-axis offset, and a `(1 AU/r)²` pressure factor for an ideal steady radial wind. The raw user pressure, speed and IMF inputs are not overwritten; solar-wind OFF remains OFF. Transient wind, IMF and CME variations are not inferred from orbit. This is a coordinate/proxy coupling, not a 3D MHD or space-weather forecast.
 
 Cloud particles/bands occupy a prescribed 12±1.5 km shell, not predicted condensation height. Altitude display gain does not modify physics. 3D shares the z=0 particle cross-section. Ground-sky sampling intersects the physical shell; diagnostic-plane maps show functions, not cloud placement.
 
-References: [NASA Moon](https://science.nasa.gov/moon/solar-wind/), [NASA/JPL Earth](https://www.jpl.nasa.gov/edu/pdfs/ss_earth.pdf), [NASA orbital cycles](https://science.nasa.gov/science-research/earth-science/milankovitch-orbital-cycles-and-their-role-in-earths-climate/), [NWS clouds](https://www.weather.gov/lmk/cloud_classification).
+References: [NASA Moon](https://science.nasa.gov/moon/solar-wind/), [NASA/JPL Earth](https://www.jpl.nasa.gov/edu/pdfs/ss_earth.pdf), [NASA seasonal space weather](https://science.nasa.gov/blogs/the-sun-spot/2023/05/05/nasa-spacecraft-reveal-how-earths-tilt-causes-seasons-in-space-weather/), [Eggington et al. (2020)](https://doi.org/10.1029/2019JA027510), [Belcher et al. (1993)](https://doi.org/10.1029/93JA01178), [NWS clouds](https://www.weather.gov/lmk/cloud_classification).
 
 ## Display, kinematics and core response
 
@@ -169,11 +169,11 @@ A useful test must pre-register locations, time windows, cloud-pattern metrics, 
 
 달의 위치와 궤도 표시는 물리적 거리인 `60.3 R_E`를 사용합니다. 기준선에서 달 전체를 나타내는 전역 쌍극자는 0이며, 선택적으로 켤 수 있는 달 전역 쌍극자는 **반드시 가설**입니다. 국소 자기 이상, 달 후류의 플라스마, 해양 및 전리층의 조석 전류는 계산하지 않습니다. 대기·단층의 자기장 진단에는 이 선택적 달 쌍극자가 포함되지 않지만, 자기장 기하 계산에는 포함됩니다.
 
-태양 중심 지구 공전 화면은 지구 중심 `R_E` 자기장 화면과 의도적으로 분리합니다. 기본값 `a=1 AU`, `e=0.0167`, `T=365.256일`로 케플러 방정식 `M=E-e sin(E)`을 풀고, `v²=mu_sun(2/r-1/a)`에서 공전 속도를 구합니다. 표시되는 상대 복사량은 `(1 AU/r)²`입니다. 이 값은 사용자가 지정한 태양풍 동압이나 IMF를 자동으로 바꾸지 않으며, 공전만으로 자기장 모델을 변형하지 않습니다.
+태양 중심 `AU` 축척과 지구 중심 `R_E` 자기장 축척은 수치적으로 분리합니다. 기본값 `a=1 AU`, `e=0.0167`, `T=365.256일`로 케플러 방정식 `M=E-e sin(E)`을 풀고, `v²=mu_sun(2/r-1/a)`에서 공전 속도를 구합니다. 항성 자전 주기 23.934시간도 같은 물리 시간으로 진행합니다. 연동을 켜면 두 자기장 화면은 공전 위치에서 구한 태양 방향, 자전축 경사 23.44°와 회전하는 사용자 지자기축 오프셋의 황도면 단면 투영, 정상상태 방사형 태양풍 가정의 동압 `(1 AU/r)²` 배율을 공유합니다. 원본 동압·속도·IMF 입력은 덮어쓰지 않고 태양풍 OFF도 유지합니다. 순간적인 태양풍·IMF·CME를 공전만으로 추정하지 않습니다. 이는 좌표/프록시 연동이며 완전한 3D MHD 또는 우주기상 예보가 아닙니다.
 
 구름 입자와 띠는 지정된 `12±1.5 km` 고도의 껍질 모양 층에 배치됩니다. 이 고도는 응결 계산으로 예측한 값이 아닙니다. 고도 표시 배율은 물리 계산을 바꾸지 않습니다. 3D도 동일한 `z=0` 입자 단면을 공유합니다. 지상 하늘 표시는 관측 방향과 물리적 구름층의 교점을 사용하며, 진단 평면 지도는 구름의 실제 배치가 아니라 함수값을 보여 줍니다.
 
-참고 자료: [NASA의 달과 태양풍 설명](https://science.nasa.gov/moon/solar-wind/), [NASA/JPL 지구 자료](https://www.jpl.nasa.gov/edu/pdfs/ss_earth.pdf), [NASA 지구 궤도 주기 설명](https://science.nasa.gov/science-research/earth-science/milankovitch-orbital-cycles-and-their-role-in-earths-climate/), [미국 기상청(NWS)의 구름 분류](https://www.weather.gov/lmk/cloud_classification).
+참고 자료: [NASA의 달과 태양풍 설명](https://science.nasa.gov/moon/solar-wind/), [NASA/JPL 지구 자료](https://www.jpl.nasa.gov/edu/pdfs/ss_earth.pdf), [NASA의 계절별 우주기상 설명](https://science.nasa.gov/blogs/the-sun-spot/2023/05/05/nasa-spacecraft-reveal-how-earths-tilt-causes-seasons-in-space-weather/), [Eggington 외 (2020)](https://doi.org/10.1029/2019JA027510), [Belcher 외 (1993)](https://doi.org/10.1029/93JA01178), [미국 기상청(NWS)의 구름 분류](https://www.weather.gov/lmk/cloud_classification).
 
 ## 시각화, 지정 운동과 외핵 응답
 

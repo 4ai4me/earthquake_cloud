@@ -1,16 +1,19 @@
 import React, { useMemo } from 'react';
-import { EarthOrbitConfig } from '../types';
-import { computeEarthOrbitState } from '../physics/earthOrbit';
+import { EarthDipoleConfig, EarthOrbitConfig, SolarWindConfig } from '../types';
+import { computeEarthOrbitState, computeSunEarthCoupling } from '../physics/earthOrbit';
 import { Pause, Play, Sun } from 'lucide-react';
 
 interface SolarOrbitViewProps {
   config: EarthOrbitConfig;
+  earthConfig: EarthDipoleConfig;
+  solarWind: SolarWindConfig;
   isPlaying: boolean;
   setIsPlaying: React.Dispatch<React.SetStateAction<boolean>>;
 }
 
-export function SolarOrbitView({ config, isPlaying, setIsPlaying }: SolarOrbitViewProps) {
+export function SolarOrbitView({ config, earthConfig, solarWind, isPlaying, setIsPlaying }: SolarOrbitViewProps) {
   const state = useMemo(() => computeEarthOrbitState(config), [config]);
+  const coupling = useMemo(() => computeSunEarthCoupling(config, earthConfig, solarWind), [config, earthConfig, solarWind]);
   const scale = 210 / Math.max(config.semiMajorAxisAu * (1 + config.eccentricity), 0.01);
   const sunX = 360;
   const sunY = 270;
@@ -36,13 +39,14 @@ export function SolarOrbitView({ config, isPlaying, setIsPlaying }: SolarOrbitVi
         <ellipse cx={ellipseCenterX} cy={sunY} rx={orbitRx} ry={orbitRy} fill="none" stroke="#334155" strokeWidth="6" opacity="0.35" filter="url(#orbit-glow)"/>
         <ellipse cx={ellipseCenterX} cy={sunY} rx={orbitRx} ry={orbitRy} fill="none" stroke="#67e8f9" strokeWidth="1.5" strokeDasharray="4 5"/>
         <line x1={sunX} y1={sunY} x2={earthX} y2={earthY} stroke="#fbbf24" strokeWidth="1" strokeDasharray="5 5" opacity="0.75"/>
+        <line x1={sunX} y1={sunY} x2={earthX} y2={earthY} stroke="#f59e0b" strokeWidth="5" opacity="0.12"/>
         <circle cx={sunX} cy={sunY} r="48" fill="url(#sun-glow)"/>
         <circle cx={sunX} cy={sunY} r="17" fill="#fbbf24" stroke="#fde68a" strokeWidth="2"/>
         <text x={sunX} y={sunY + 70} fill="#fcd34d" fontSize="13" textAnchor="middle">태양 · 궤도 초점</text>
         <g transform={`translate(${earthX} ${earthY})`}>
           <circle r="17" fill="#38bdf8" opacity="0.25" filter="url(#orbit-glow)"/>
           <circle r="9" fill="url(#earth-orbit-body)" stroke="#bae6fd" strokeWidth="1.5"/>
-          <line x1={-Math.sin(config.axialTiltDeg * Math.PI / 180) * 17} y1={Math.cos(config.axialTiltDeg * Math.PI / 180) * 17} x2={Math.sin(config.axialTiltDeg * Math.PI / 180) * 17} y2={-Math.cos(config.axialTiltDeg * Math.PI / 180) * 17} stroke="#f8fafc" strokeWidth="1.5"/>
+          <line x1={-Math.sin(coupling.projectedDipoleAngleDeg * Math.PI / 180) * 17} y1={Math.cos(coupling.projectedDipoleAngleDeg * Math.PI / 180) * 17} x2={Math.sin(coupling.projectedDipoleAngleDeg * Math.PI / 180) * 17} y2={-Math.cos(coupling.projectedDipoleAngleDeg * Math.PI / 180) * 17} stroke="#f8fafc" strokeWidth="1.5"/>
           <text x="0" y="30" fill="#bae6fd" fontSize="13" textAnchor="middle">지구</text>
         </g>
         <text x="24" y="36" fill="#e2e8f0" fontSize="15" fontWeight="600">태양 중심 지구 공전 · 실제 이심률</text>
@@ -55,8 +59,10 @@ export function SolarOrbitView({ config, isPlaying, setIsPlaying }: SolarOrbitVi
           <span>거리</span><strong>{(state.distanceKm / 1_000_000).toFixed(3)} 백만 km</strong>
           <span>공전 속도</span><strong>{state.orbitalSpeedKmS.toFixed(2)} km/s</strong>
           <span>1 AU 대비 복사량</span><strong>{state.solarFluxRatio.toFixed(4)} ×</strong>
+          <span>자전 위상 / 쌍극 투영</span><strong className="text-purple-200">{(config.rotationPhaseDeg ?? 0).toFixed(1)}° / {coupling.projectedDipoleAngleDeg.toFixed(1)}°</strong>
+          <span>태양풍 방향 / 동압</span><strong className="text-amber-200">{coupling.solarWindFlowAngleDeg.toFixed(1)}° / {coupling.solarWindPressureRatio.toFixed(4)}×</strong>
         </div>
-        <p className="mt-2 text-amber-200">거리 역제곱은 태양 복사량 파생값입니다. 공전만으로 자기권을 임의 변형하지 않습니다.</p>
+        <p className="mt-2 text-amber-200">2D/3D는 태양 방향·쌍극축 투영·정상상태 동압 r⁻²를 공유합니다. 순간 태양풍/IMF는 별도 입력입니다.</p>
       </div>
       <button type="button" onClick={() => setIsPlaying(value => !value)} className="absolute right-3 top-3 flex items-center gap-1.5 rounded border border-cyan-700 bg-slate-950/90 px-3 py-2 text-xs text-cyan-200">
         {isPlaying ? <Pause className="h-4 w-4"/> : <Play className="h-4 w-4"/>}{isPlaying ? '전체 시간 정지' : '전체 시간 재생'}

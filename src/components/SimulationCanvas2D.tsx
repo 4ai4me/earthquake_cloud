@@ -507,10 +507,19 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
       if (solarWind.enabled && currentLayers.solarWind) {
         ctx.save();
         const swCount = 24;
+        const flowAngle = (solarWind.flowAngleDeg ?? 0) * Math.PI / 180;
+        const flowX = Math.cos(flowAngle), flowY = Math.sin(flowAngle);
+        const crossX = -flowY, crossY = flowX;
+        const span = Math.max(maxWorld.wx - minWorld.wx, maxWorld.wy - minWorld.wy);
         for (let i = 0; i < swCount; i++) {
-          const swY = minWorld.wy + ((maxWorld.wy - minWorld.wy) * i) / swCount;
-          const offset = ((animationPhase * 2.5 + i * 1.7) % 5) - 6;
-          const p = worldToCanvas(offset, swY, width, height);
+          const cross = -span / 2 + span * i / Math.max(1, swCount - 1);
+          const along = ((animationPhase * 2.5 + i * 1.7) % 5) - span / 2;
+          const p = worldToCanvas(
+            earthConfig.x + flowX * along + crossX * cross,
+            earthConfig.y + flowY * along + crossY * cross,
+            width,
+            height,
+          );
 
           // Solar wind ion arrow
           ctx.fillStyle = 'rgba(251, 191, 36, 0.6)';
@@ -521,7 +530,7 @@ export const SimulationCanvas2D: React.FC<SimulationCanvas2DProps> = ({
           ctx.strokeStyle = 'rgba(251, 191, 36, 0.3)';
           ctx.lineWidth = 1.5;
           ctx.beginPath();
-          ctx.moveTo(p.cx - 15, p.cy);
+          ctx.moveTo(p.cx - flowX * 15, p.cy + flowY * 15);
           ctx.lineTo(p.cx, p.cy);
           ctx.stroke();
         }

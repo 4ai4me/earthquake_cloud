@@ -19,7 +19,7 @@ import {
 } from './types';
 import { CloudParticleSystem } from './physics/cloudParticleEngine';
 import { advanceMoon, advanceSource, DEFAULT_RESEARCH, ResearchConfig, needsLogOnly } from './physics/fieldModel';
-import { advanceEarthOrbit, computeEarthOrbitState } from './physics/earthOrbit';
+import { advanceEarthOrbit, computeEarthOrbitState, computeSunEarthCoupling } from './physics/earthOrbit';
 import { KnowledgePage } from './components/KnowledgePage';
 import { CrustalStressManager } from './physics/crustalStressEngine';
 import { GLOBAL_WEATHER_PRESETS } from './physics/weatherEngine';
@@ -87,6 +87,22 @@ export default function App() {
 
   // 6. Heliocentric Earth Orbit (kept separate from the R_E magnetosphere scale)
   const [earthOrbitConfig, setEarthOrbitConfig] = useState<EarthOrbitConfig>({ ...DEFAULT_EARTH_ORBIT_CONFIG });
+  const sunEarthCoupling = useMemo(
+    () => computeSunEarthCoupling(earthOrbitConfig, earthConfig, solarWind),
+    [earthOrbitConfig, earthConfig, solarWind],
+  );
+  // Keep numerical time/readouts at 10 Hz, but bound expensive 2D/3D RK4
+  // geometry rebuilds to 4 Hz. This avoids worker churn at accelerated rates
+  // such as five physical rotations per display second.
+  const latestCouplingRef = useRef(sunEarthCoupling);
+  latestCouplingRef.current = sunEarthCoupling;
+  const [renderCoupling, setRenderCoupling] = useState(sunEarthCoupling);
+  useEffect(() => {
+    const timer = window.setInterval(() => setRenderCoupling(latestCouplingRef.current), 250);
+    return () => window.clearInterval(timer);
+  }, []);
+  const effectiveEarthConfig = renderCoupling.earth;
+  const effectiveSolarWind = renderCoupling.solarWind;
 
   // 7. Atmospheric Cloud Particle Model Configuration ("가상 지진운")
   const [cloudConfig, setCloudConfig] = useState<AtmosphericCloudConfig>(createDefaultCloudConfig);
@@ -175,9 +191,10 @@ export default function App() {
         });
         return changed ? next : prev;
       });
-      if (!needsLogOnly({ earth:state.earthConfig, sources:state.sources, solar:state.solarWind, moon:state.moonConfig })) {
-        particleSystem.update(state.cloudConfig, state.earthConfig, state.sources, state.solarWind, dt, now/1000);
-        stressManager.update(state.earthConfig, state.sources, state.solarWind, dt, handleEarthquakeTriggered, state.moonConfig);
+      const effective = computeSunEarthCoupling(state.earthOrbitConfig, state.earthConfig, state.solarWind);
+      if (!needsLogOnly({ earth:effective.earth, sources:state.sources, solar:effective.solarWind, moon:state.moonConfig })) {
+        particleSystem.update(state.cloudConfig, effective.earth, state.sources, effective.solarWind, dt, now/1000);
+        stressManager.update(effective.earth, state.sources, effective.solarWind, dt, handleEarthquakeTriggered, state.moonConfig);
       }
     }, 100);
     return () => clearInterval(timer);
@@ -512,11 +529,11 @@ export default function App() {
               <SimulationCanvas2D
                 research={research} isPlaying={isPlaying} setIsPlaying={setIsPlaying}
                 key={`${cloudConfig.perspectiveMode ?? 'space_global'}:${cloudConfig.inspectionMode === 'split_3view' ? 'split' : 'canvas'}`}
-                earthConfig={earthConfig}
+                earthConfig={effectiveEarthConfig}
                 setEarthConfig={setEarthConfig}
                 sources={sources}
                 setSources={setSources}
-                solarWind={solarWind}
+                solarWind={effectiveSolarWind}
                 setSolarWind={setSolarWind}
                 moonConfig={moonConfig}
                 setMoonConfig={setMoonConfig}
@@ -542,9 +559,9 @@ export default function App() {
                 <Magnetosphere3DView
                   particleSystem={particleSystem} setLayerVisibility={setLayerVisibility}
                   research={research} moonConfig={moonConfig} isPlaying={isPlaying} setIsPlaying={setIsPlaying} layerVisibility={layerVisibility}
-                  earthConfig={earthConfig}
+                  earthConfig={effectiveEarthConfig}
                   sources={sources}
-                  solarWind={solarWind}
+                  solarWind={effectiveSolarWind}
                   cloudConfig={cloudConfig}
                 />
               </Suspense>
@@ -555,11 +572,11 @@ export default function App() {
                 <SimulationCanvas2D
                   research={research} isPlaying={isPlaying} setIsPlaying={setIsPlaying}
                   key={`split:${cloudConfig.perspectiveMode ?? 'space_global'}:${cloudConfig.inspectionMode === 'split_3view' ? 'split' : 'canvas'}`}
-                  earthConfig={earthConfig}
+                  earthConfig={effectiveEarthConfig}
                   setEarthConfig={setEarthConfig}
                   sources={sources}
                   setSources={setSources}
-                  solarWind={solarWind}
+                  solarWind={effectiveSolarWind}
                   setSolarWind={setSolarWind}
                   moonConfig={moonConfig}
                   setMoonConfig={setMoonConfig}
@@ -582,9 +599,9 @@ export default function App() {
                   <Magnetosphere3DView
                     particleSystem={particleSystem} setLayerVisibility={setLayerVisibility}
                     research={research} moonConfig={moonConfig} isPlaying={isPlaying} setIsPlaying={setIsPlaying} layerVisibility={layerVisibility}
-                    earthConfig={earthConfig}
+                    earthConfig={effectiveEarthConfig}
                     sources={sources}
-                    solarWind={solarWind}
+                    solarWind={effectiveSolarWind}
                     cloudConfig={cloudConfig}
                   />
                 </Suspense>
@@ -592,13 +609,65 @@ export default function App() {
             )}
 
             {viewMode === 'orbit' && (
-              <SolarOrbitView config={earthOrbitConfig} isPlaying={isPlaying} setIsPlaying={setIsPlaying} />
+              <div className="grid h-full grid-rows-[42%_58%] gap-1 bg-[#05060a]" data-testid="orbit-combined-view">
+                <section aria-label="태양 중심 공전 패널" className="min-h-0 overflow-hidden border-b border-amber-500/25">
+                  <SolarOrbitView config={earthOrbitConfig} earthConfig={earthConfig} solarWind={solarWind} isPlaying={isPlaying} setIsPlaying={setIsPlaying} />
+                </section>
+                <div className="grid min-h-0 grid-cols-2 gap-1">
+                  <section aria-label="태양 공전 모드 2D 벡터장" className="flex min-w-0 flex-col overflow-hidden border-r border-cyan-500/20" data-testid="orbit-panel-2d">
+                    <div className="shrink-0 border-b border-cyan-900/60 bg-slate-950 px-2 py-1 text-[10px] font-mono font-semibold text-cyan-300">자전·공전 연동 · 2D · 태양풍 {renderCoupling.solarWindFlowAngleDeg.toFixed(0)}° · 쌍극 {renderCoupling.projectedDipoleAngleDeg.toFixed(1)}°</div>
+                    <div className="relative min-h-0 flex-1">
+                      <SimulationCanvas2D
+                        research={research} isPlaying={isPlaying} setIsPlaying={setIsPlaying}
+                        key={`orbit:${cloudConfig.perspectiveMode ?? 'space_global'}:${cloudConfig.inspectionMode === 'split_3view' ? 'split' : 'canvas'}`}
+                        earthConfig={effectiveEarthConfig}
+                        setEarthConfig={setEarthConfig}
+                        sources={sources}
+                        setSources={setSources}
+                        solarWind={effectiveSolarWind}
+                        setSolarWind={setSolarWind}
+                        moonConfig={moonConfig}
+                        setMoonConfig={setMoonConfig}
+                        cloudConfig={cloudConfig}
+                        setCloudConfig={setCloudConfig}
+                        stressManager={stressManager}
+                        particleSystem={particleSystem}
+                        onEarthquakeTriggered={handleEarthquakeTriggered}
+                        renderMode={renderMode}
+                        setRenderMode={setRenderMode}
+                        heatmapMetric={heatmapMetric}
+                        setHeatmapMetric={setHeatmapMetric}
+                        showNeutralPoints={showNeutralPoints}
+                        setShowNeutralPoints={setShowNeutralPoints}
+                        streamlineDensity={streamlineDensity}
+                        layerVisibility={layerVisibility}
+                        setLayerVisibility={setLayerVisibility}
+                      />
+                    </div>
+                  </section>
+                  <section aria-label="태양 공전 모드 3D 자기권" className="flex min-w-0 flex-col overflow-hidden" data-testid="orbit-panel-3d">
+                    <div className="shrink-0 border-b border-purple-900/60 bg-slate-950 px-2 py-1 text-[10px] font-mono font-semibold text-purple-300">자전·공전 연동 · 3D · 동압 ×{renderCoupling.solarWindPressureRatio.toFixed(4)} · 쌍극 {renderCoupling.projectedDipoleAngleDeg.toFixed(1)}°</div>
+                    <div className="relative min-h-0 flex-1">
+                      <Suspense fallback={<ViewLoadingFallback />}>
+                        <Magnetosphere3DView
+                          particleSystem={particleSystem} setLayerVisibility={setLayerVisibility}
+                          research={research} moonConfig={moonConfig} isPlaying={isPlaying} setIsPlaying={setIsPlaying} layerVisibility={layerVisibility}
+                          earthConfig={effectiveEarthConfig}
+                          sources={sources}
+                          solarWind={effectiveSolarWind}
+                          cloudConfig={cloudConfig}
+                        />
+                      </Suspense>
+                    </div>
+                  </section>
+                </div>
+              </div>
             )}
 
             {viewMode !== 'orbit' && earthOrbitConfig.enabled && (() => {
               const orbit = computeEarthOrbitState(earthOrbitConfig);
               return <div data-testid="earth-orbit-status" className="pointer-events-none absolute bottom-3 left-1/2 z-40 -translate-x-1/2 rounded border border-amber-700/50 bg-slate-950/90 px-2 py-1 text-[10px] font-mono text-amber-100 shadow-lg">
-                태양 공전 M {earthOrbitConfig.phaseAngleDeg.toFixed(1)}° · {orbit.distanceAu.toFixed(4)} AU · {orbit.orbitalSpeedKmS.toFixed(1)} km/s
+                태양 공전 M {earthOrbitConfig.phaseAngleDeg.toFixed(1)}° · {orbit.distanceAu.toFixed(4)} AU · 태양풍 {sunEarthCoupling.solarWindFlowAngleDeg.toFixed(0)}° · 쌍극 {sunEarthCoupling.projectedDipoleAngleDeg.toFixed(1)}°
               </div>;
             })()}
 

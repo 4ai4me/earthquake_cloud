@@ -143,7 +143,16 @@ export function lunarField(point: Point3, context: FieldContext): FieldSample {
 
 export function externalField(point: Point3, context: FieldContext): FieldSample {
   const fields = context.sources.map(source => sourceField(point, source));
-  if (context.solar.enabled) fields.push(vectorField(context.solar.imfBx, context.solar.imfBz, 0, 0));
+  if (context.solar.enabled) {
+    const angle = (context.solar.flowAngleDeg ?? 0) * Math.PI / 180;
+    const cos = Math.cos(angle), sin = Math.sin(angle);
+    fields.push(vectorField(
+      context.solar.imfBx * cos - context.solar.imfBz * sin,
+      context.solar.imfBx * sin + context.solar.imfBz * cos,
+      0,
+      0,
+    ));
+  }
   fields.push(lunarField(point, context));
   return sumFields(fields);
 }
@@ -205,7 +214,13 @@ export function magnetopausePoint(theta: number, phi: number, context: FieldCont
   // Explicit application guard, not an asserted fit-domain theorem. Never clamp an extreme input.
   if (!solar.enabled || solar.pressure < 0.05 || solar.pressure > 100 || Math.abs(solar.imfBz) > 50) return null;
   const r = computeShueMagnetopauseRadius(theta, solar.pressure, solar.imfBz).radiusEarthRadii;
-  return { x: context.earth.x-r*Math.cos(theta), y: context.earth.y+r*Math.sin(theta)*Math.cos(phi), z: r*Math.sin(theta)*Math.sin(phi) };
+  const x = -r*Math.cos(theta), y = r*Math.sin(theta)*Math.cos(phi);
+  const angle = (solar.flowAngleDeg ?? 0) * Math.PI / 180;
+  return {
+    x: context.earth.x + x*Math.cos(angle) - y*Math.sin(angle),
+    y: context.earth.y + x*Math.sin(angle) + y*Math.cos(angle),
+    z: r*Math.sin(theta)*Math.sin(phi),
+  };
 }
 
 export function distanceLabel(point: Point3, earth: EarthDipoleConfig): string {

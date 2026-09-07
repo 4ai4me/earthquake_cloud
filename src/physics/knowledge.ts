@@ -22,6 +22,9 @@ export const REFERENCES: Record<string,{ title:string; url:string; use:string }>
   magnetophoresis:{title:'Suwa et al. (2023), Applications of magnetic and electromagnetic forces in micro-analytical systems',url:'https://doi.org/10.1039/D2LC00702A',use:'자기력·입자 힘과 유체 항력 배경. 대기 물방울의 강한 자기 정렬을 보장하지 않음.'},
   earthOrbit:{title:'NASA/JPL — Earth: Facts & Figures',url:'https://www.jpl.nasa.gov/edu/pdfs/ss_earth.pdf',use:'지구의 평균 태양 거리 1 AU, 공전 주기 약 365.26일, 자전축 경사 기준값.'},
   seasons:{title:'NASA Science — Milankovitch Cycles',url:'https://science.nasa.gov/science-research/earth-science/milankovitch-orbital-cycles-and-their-role-in-earths-climate/',use:'현재 지구 궤도 이심률과 거리 변화, 자전축 경사·계절 해석의 배경.'},
+  seasonalSpaceWeather:{title:'NASA Science — How Earth’s tilt causes seasons in space weather',url:'https://science.nasa.gov/blogs/the-sun-spot/2023/05/05/nasa-spacecraft-reveal-how-earths-tilt-causes-seasons-in-space-weather/',use:'지구 자전축과 태양 방향의 계절 기하가 자기권 경계 불안정성에 영향을 줄 수 있다는 관측 배경.'},
+  dipoleTilt:{title:'Eggington et al. (2020), Dipole Tilt Effect on Magnetopause Reconnection',url:'https://doi.org/10.1029/2019JA027510',use:'쌍극 기울기의 일주·계절 변화와 자기권 재결합/비대칭에 관한 전역 MHD 연구. 앱의 평면 투영은 이 논문의 MHD 재현이 아님.'},
+  windDistance:{title:'Belcher et al. (1993), Solar wind conditions in the outer heliosphere',url:'https://doi.org/10.1029/93JA01178',use:'평균 태양풍 램압의 태양 중심 거리 r^-2 적합과 같은 거리에서도 큰 단기 변동이 존재한다는 근거.'},
 };
 
 // Entries group aliases used in controls, formulas, legends and exported diagnostics.
@@ -42,14 +45,15 @@ export const KNOWLEDGE: KnowledgeItem[] = [
   item('μ₀ · 진공 투자율 · 자기압 P_mag · nPa Pa kPa MPa','단위','기초 이론','P_mag=B²/(2μ₀), μ₀≈4π×10⁻⁷ H/m. 압력 1 Pa=10⁹ nPa, 1 kPa=10³ Pa, 1 MPa=10⁶ Pa.','자기 에너지 밀도/압력이 곧바로 같은 크기의 지각 응력을 발생시킨다는 뜻은 아니다.'),
   item('구배 gradient ∇|B| ∇B² · 공간 변화','자기장','기초 이론','위치에 따른 자기장 세기 변화율. 실제 단위는 nT/km 등이며 내부 미분은 B*/R_E로 계산한다.','벡터 외적과 구배는 차원이 달라 정규화 없이 더할 수 없다.'),
   item('자기권 magnetosphere · 자기권계면 magnetopause · 약자기장 등치선','자기장','물리 근사','보라 점선은 사용자가 정한 |B_E| 기준의 이상적 쌍극자 등치선. 주황 선은 태양풍에 따른 Shue 자기권계면이다.','자기장이 0이 되는 절대 경계가 아니다. 두 선은 의미가 다르며 외부장 때문에 생긴 국소 영점도 경계면 전체가 아니다.',['shue']),
-  item('Shue · r₀ · alpha α · 태양 천정각 θ · dayside magnetotail','이론','물리 근사','r(θ)=r₀[2/(1+cosθ)]^α. r₀와 α는 태양풍 동압 및 IMF Bz 함수. 이 앱의 태양 방향은 −X이다.','앱 보호 범위 P=0.05–100 nPa, |Bz|≤50 nT 밖에서는 선을 숨기고 경고한다. 이는 논문의 보편적 유효 범위를 선언한 것이 아니다. 임의 외부장을 포함한 경계는 미해결.',['shue']),
+  item('Shue · r₀ · alpha α · 태양 천정각 θ · dayside magnetotail','이론','물리 근사','r(θ)=r₀[2/(1+cosθ)]^α. r₀와 α는 태양풍 동압 및 IMF Bz 함수. 기준 태양풍 +X/태양측 −X 형상을 공전 방향각만큼 2D·3D에서 함께 회전한다.','앱 보호 범위 P=0.05–100 nPa, |Bz|≤50 nT 밖에서는 선을 숨기고 경고한다. 이는 논문의 보편적 유효 범위를 선언한 것이 아니다. 임의 외부장을 포함한 경계는 미해결.',['shue']),
   item('태양풍 solar wind · 플라스마 · 동압 P_dyn · ρv²','우주환경','물리 근사','전하를 가진 입자 흐름. 양성자 근사 동압[nPa]=1.6726×10⁻⁶ n[cm⁻³] v[km/s]².','밀도·속도·자기장 방향·시간이 함께 중요하다. 외부 자기장 하나의 nT 임계값만으로 모든 영향을 결정할 수 없다.'),
   item('IMF · Bx · Bz · 남향 북향 · CME · 지자기 폭풍','우주환경','기초 이론','IMF는 행성간 자기장. 남향 Bz는 자기권 결합에 중요하며 CME는 코로나 질량 방출이다. UI의 Y축에 IMF Bz를 대응한다.','CME 버튼은 가상 조건 변화이며 실제 태양 관측 사건 재현은 아니다.'),
   item('Bow shock 활모양 충격파 · 재결합 reconnection · X-point 중성점','우주환경','물리 근사','태양풍 충격파와 자기권계면은 서로 다른 면이다. 자기장 영점은 재결합 후보 구조와 관련될 수 있다.','정자기 영점 탐지만으로 재결합률·입자 가열·에너지 유입을 계산한 것이 아니다. 이전 고정 원뿔 Bow Shock 표시는 제거했다.'),
   item('밴앨런대 · 방사선대 · 오로라 · 전리층 열권 중간권','우주환경','기초 이론','자기권 입자 포획 영역, 극지 발광 현상, 전리된 대기와 고도별 대기층을 뜻한다.','앱의 광륜·입자·펄스는 해당 현상을 정량적으로 해석한 결과가 아니다.'),
   item('달 공전 · 자전 · 위상 phase · 삭 망 상현 하현 · 동주기','달','관측 기반','대표 거리 60.3 R_E, 항성 공전 주기 27.32일. 자전 방향 표시를 공전 위상에 동기화한다. 실제 일/화면 초 배율이 2D·3D에 공통 적용된다.','원궤도·일정 주기 근사이며 이심률·경사·삭망월과 항성월 차이를 정밀 계산하지 않는다.',['nasaMoon']),
   item('지구 태양 공전 · AU · 케플러 방정식 · 평균근점이각 M · 이심률 e','태양계','관측 기반','태양을 한 초점으로 하는 타원 궤도에서 M=E−e sin(E)를 풀어 위치를 구한다. 기본 장반경 1 AU, 이심률 0.0167, 항성주기 365.256일이며 위상 0°는 근일점이다.','1 AU 태양계 화면과 R_E 자기권 화면은 축척이 다르다. 위상은 달의 삭·망 같은 광학 위상이 아니며 행성 섭동·세차는 계산하지 않는다.',['earthOrbit','seasons']),
-  item('태양–지구 거리 · 근일점 · 원일점 · 공전 속도 · vis-viva · 복사량 r⁻²','태양계','물리 근사','거리와 속도는 타원 궤도 및 vis-viva 식 v²=μ(2/r−1/a)로 계산한다. 1 AU 대비 태양 복사량 표시는 1/r² 파생값이다.','복사량 비가 태양풍 동압·IMF 또는 자기권 변형으로 자동 변환되지는 않는다. 공전만으로 지구 자기장이 크게 출렁이는 효과를 만들지 않는다.',['earthOrbit','seasons']),
+  item('태양–지구 거리 · 근일점 · 원일점 · 공전 속도 · vis-viva · 복사량·평균 동압 r⁻²','태양계','물리 근사','거리와 속도는 타원 궤도 및 vis-viva 식 v²=μ(2/r−1/a)로 계산한다. 정상상태 방사형 흐름을 가정할 때 밀도와 기준 동압은 1/r²로 희석되므로 사용자가 정한 1 AU 동압에 같은 거리 배율을 적용한다.','실제 태양풍 속도·밀도·IMF/CME는 시간 변동이 크며 공전만으로 예측할 수 없다. 태양풍 OFF를 자동으로 켜지 않고 원본 입력을 덮어쓰지 않는다.',['earthOrbit','seasons','windDistance']),
+  item('지구 항성 자전 · 23.934 h · 자전축 23.44° · 지자기축 오프셋 · 일주·계절 쌍극 기울기','태양계','물리 근사','공전과 같은 물리 시간으로 자전 위상을 진행한다. 태양 방향은 공전 위치에서 구하고, 자전축 경사와 회전하는 사용자 지자기축 오프셋을 황도면 단면에 투영해 2D·3D 공통 쌍극축으로 사용한다.','실제 3차원 GSM 좌표 변환, 지자기장 고차항, 이온권 전도도와 MHD 재결합을 풀지 않은 평면 프록시이다. 빠른 시간 배율에서는 자전이 빠르게 보이는 것이 물리 시간비의 결과다.',['seasonalSpaceWeather','dipoleTilt']),
   item('달 잔류자기 · remanentMoment · 국소 지각 자기장 · 나침반','달','관측 기반','달에는 지구 같은 확인된 전역 자기장이 없고 국소 자기 이상이 있다. 지구 나침반처럼 일관된 자기 북쪽을 기대할 수 없다.','국소 달 자기장 지도는 현재 불러오지 않는다. 전역 쌍극자 기본 OFF는 국소장이 없다는 뜻이 아니다.',['nasaMoon']),
   item('달 전역 쌍극자 · hypothesisDipoleEnabled · m_M','달','반드시 가설','이전 전역 달 쌍극자는 선택적인 가설 모드로 분리했다. 실제 거리와 동주기 방향을 사용한다.','관측된 달의 전역 자기 모멘트가 아니며 기본값은 OFF/0.',['nasaMoon']),
   item('조석 tide · tidalStressWeight · 기조력 · tidal bulge','달','물리 근사','가역적 사중극 형태 응력∝d⁻³ cos(2Δθ), 대표 최대 4 kPa로 보정한다.','조석 섭동을 판구조 하중처럼 계속 누적하지 않는다. 과장된 지구 팽창 그림은 기본 OFF. 해양·전리층 자기 조석은 미계산.',['tide','ocean']),

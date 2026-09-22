@@ -30,6 +30,8 @@ export const CERN_CLOUD_PRESETS: Record<CernCloudEnvironment, CernCloudAerosolCo
     iodineOxoacidCm3: 1e5,
     ipOomCm3: 0,
     msaCm3: 0,
+    nitricAcidPptv: 100, // Boundary layer urban/regional nitric acid
+    seismicIonizationIncrement: 0,
     condensationSinkS: 0.002,
     vaporExposureSeconds: 300,
     growthHours: 12,
@@ -50,6 +52,8 @@ export const CERN_CLOUD_PRESETS: Record<CernCloudEnvironment, CernCloudAerosolCo
     iodineOxoacidCm3: 1e6,
     ipOomCm3: 0,
     msaCm3: 1e6,
+    nitricAcidPptv: 10,
+    seismicIonizationIncrement: 0,
     condensationSinkS: 0.0005,
     vaporExposureSeconds: 600,
     growthHours: 24,
@@ -70,6 +74,8 @@ export const CERN_CLOUD_PRESETS: Record<CernCloudEnvironment, CernCloudAerosolCo
     iodineOxoacidCm3: 1e5,
     ipOomCm3: 1e7,
     msaCm3: 0,
+    nitricAcidPptv: 200, // Wang et al. (2020) Upper-tropospheric HNO3
+    seismicIonizationIncrement: 0,
     condensationSinkS: 0.0001,
     vaporExposureSeconds: 900,
     growthHours: 8,
@@ -78,6 +84,7 @@ export const CERN_CLOUD_PRESETS: Record<CernCloudEnvironment, CernCloudAerosolCo
     coupleToCloudBaseline: false,
   },
 };
+
 
 /**
  * Bounded literature-guided screening model, not the CLOUD collaboration's
@@ -145,7 +152,10 @@ export function computeCernCloudAerosol(config: CernCloudAerosolConfig): CernClo
 
   // Each stable ion-induced particle consumes an ion pair, so this contribution
   // is capped by the supplied ion-pair production rate.
-  const q = clamp(config.ionPairProductionCm3S, 0, 100);
+  // Pulinets & Freund LAIC coupling optionally adds pre-seismic radon/charge ionization delta-q.
+  const baseQ = config.ionPairProductionCm3S;
+  const seismicQ = config.seismicIonizationIncrement ?? 0;
+  const q = clamp(baseQ + seismicQ, 0, 100);
   const warmIonSensitivity = clamp((temperatureK - 223) / 55, 0.1, 1);
   const ionInducedRateCm3S = Math.min(q, neutralNucleationRateCm3S * (q / (q + 2)) * warmIonSensitivity);
   const totalNucleationRateCm3S = neutralNucleationRateCm3S + ionInducedRateCm3S;
@@ -156,7 +166,12 @@ export function computeCernCloudAerosol(config: CernCloudAerosolConfig): CernClo
     ? upperTroposphereActivation * (3 + 57 * ipOom / (ipOom + 1e7))
     : 0;
   const msaGrowth = saGrowth * msaRatio * marineColdActivation;
-  const growthRateNmH = clamp(saGrowth + iodineGrowth + ipOomGrowth + msaGrowth, 0, 60);
+  // Wang et al. (2020 Nature): rapid particle growth via nitric acid - ammonia co-condensation at cold temperatures (T < 260 K)
+  const nitric = finiteNonNegative(config.nitricAcidPptv ?? 0);
+  const nitricColdActivation = clamp((260 - temperatureK) / 20, 0, 1);
+  const nitricGrowth = nitricColdActivation * 1.5 * (nitric / (nitric + 100)) * Math.min(2, ammonia / 3);
+  const growthRateNmH = clamp(saGrowth + iodineGrowth + ipOomGrowth + msaGrowth + nitricGrowth, 0, 60);
+
   const growthHours = clamp(config.growthHours, 0, 168);
   const finalDryDiameterNm = 1.7 + growthRateNmH * growthHours;
   const ccnCriticalDryDiameterNm = computeKappaKohlerCriticalDiameterNm(

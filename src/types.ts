@@ -37,6 +37,7 @@ export interface MoonConfig {
   wakeCavityStrength: number; // solar wind downstream diamagnetic wake attenuation (~0.7)
   showOrbit: boolean;
   showTidalBulge: boolean;
+  solarTideEnabled?: boolean; // Ide et al. (2016) solar-lunar tidal interference (Spring/Neap)
   autoOrbit: boolean;
   orbitSpeed: number; // speed multiplier for orbital animation
 }
@@ -141,6 +142,8 @@ export interface CernCloudAerosolConfig {
   iodineOxoacidCm3: number;
   ipOomCm3: number;
   msaCm3: number;
+  nitricAcidPptv?: number; // Wang et al. (2020) rapid particle growth via HNO3-NH3 co-condensation
+  seismicIonizationIncrement?: number; // Pulinets & Freund LAIC pre-seismic radon/charge ionization delta-q
   condensationSinkS: number;
   vaporExposureSeconds: number;
   growthHours: number;
@@ -170,7 +173,11 @@ export interface AtmosphericCloudConfig {
   viscosity: number;
   hypothesisEnabled?: boolean; // false is the null/control run
   hypothesisCoupling?: number; // dimensionless, testable magnetic-atmospheric coupling amplitude
+  laicCouplingEnabled?: boolean; // Pulinets & Freund LAIC crustal stress -> atmospheric ionization coupling (false = null control)
+  laicSeismicIonizationScale?: number; // Maximum delta-q (cm^-3 s^-1) generated at near-failure fault stress
+  seismicIonizationValue?: number; // Current live delta-q generated from crustal stress
   turbulentDiffusivity?: number; // schematic world-unit^2 / simulation-second
+
   // Inspection and Perspective enhancements
   inspectionMode?: InspectionViewMode;
   perspectiveMode?: PerspectiveViewMode;
@@ -315,6 +322,7 @@ export const DEFAULT_MOON_CONFIG: MoonConfig = {
   wakeCavityStrength: 0.7,
   showOrbit: true,
   showTidalBulge: false,
+  solarTideEnabled: true, // Baseline physics: combined lunar + solar tide
   autoOrbit: true,
   orbitSpeed: 0.3,
 };
@@ -340,6 +348,9 @@ export const DEFAULT_CLOUD_CONFIG: AtmosphericCloudConfig = {
   viscosity: 0.08,
   hypothesisEnabled: true,
   hypothesisCoupling: 0.6,
+  laicCouplingEnabled: false, // Explicit hypothesis: null control is OFF
+  laicSeismicIonizationScale: 15,
+  seismicIonizationValue: 0,
   turbulentDiffusivity: 0.00002,
   perspectiveMode: 'space_global',
   inspectionMode: 'none',
@@ -359,6 +370,8 @@ export const DEFAULT_CLOUD_CONFIG: AtmosphericCloudConfig = {
     iodineOxoacidCm3: 1e5,
     ipOomCm3: 0,
     msaCm3: 0,
+    nitricAcidPptv: 50, // Wang et al. (2020) trace nitric acid
+    seismicIonizationIncrement: 0,
     condensationSinkS: 0.002,
     vaporExposureSeconds: 300,
     growthHours: 12,

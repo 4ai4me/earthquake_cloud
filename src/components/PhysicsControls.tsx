@@ -551,11 +551,16 @@ export const PhysicsControls: React.FC<PhysicsControlsProps> = ({
             <button onClick={() => setMoonConfig?.(p => ({ ...p, autoOrbit:!p.autoOrbit }))} className="border border-cyan-800 rounded p-2">{moonConfig.autoOrbit ? '공전 진행 중' : '공전 정지'}</button>
             <label className="flex gap-2"><input type="checkbox" checked={moonConfig.showOrbit} onChange={e => setMoonConfig?.(p => ({ ...p, showOrbit:e.target.checked }))} />공전 궤도 표시</label>
             <NumericInput label="조석 응력 보정 (0–1, 가역적 최대 4 kPa)" value={moonConfig.tidalStressWeight} min={0} max={1} onChange={tidalStressWeight => setMoonConfig?.(p => ({ ...p, tidalStressWeight }))} />
+            <label className="flex gap-2 text-sky-300">
+              <input type="checkbox" checked={moonConfig.solarTideEnabled !== false} onChange={e => setMoonConfig?.(p => ({ ...p, solarTideEnabled: e.target.checked }))} />
+              태양 조석 합성 (Ide et al. 2016: 삭망 대조기 / 상하현 소조기 2주 주기 간섭)
+            </label>
             <label className="flex gap-2 text-amber-300"><input type="checkbox" checked={!!moonConfig.hypothesisDipoleEnabled} onChange={e => setMoonConfig?.(p => ({ ...p, hypothesisDipoleEnabled:e.target.checked }))} />반드시 가설: 달 전역 쌍극자 (기본 OFF)</label>
             {moonConfig.hypothesisDipoleEnabled && <NumericInput label="가설 달 모멘트 (M_E, 관측값 아님)" value={moonConfig.remanentMoment} min={0} onChange={remanentMoment => setMoonConfig?.(p => ({ ...p, remanentMoment }))} />}
             <button onClick={handleResetMoonNormal} className="border rounded p-2">달 기본값 복원</button>
           </div>
         )}
+
 
         {activeTab === 'orbit' && (() => {
           const orbit = computeEarthOrbitState(earthOrbitConfig);

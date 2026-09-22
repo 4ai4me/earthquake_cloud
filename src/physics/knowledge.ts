@@ -25,7 +25,13 @@ export const REFERENCES: Record<string,{ title:string; url:string; use:string }>
   seasonalSpaceWeather:{title:'NASA Science — How Earth’s tilt causes seasons in space weather',url:'https://science.nasa.gov/blogs/the-sun-spot/2023/05/05/nasa-spacecraft-reveal-how-earths-tilt-causes-seasons-in-space-weather/',use:'지구 자전축과 태양 방향의 계절 기하가 자기권 경계 불안정성에 영향을 줄 수 있다는 관측 배경.'},
   dipoleTilt:{title:'Eggington et al. (2020), Dipole Tilt Effect on Magnetopause Reconnection',url:'https://doi.org/10.1029/2019JA027510',use:'쌍극 기울기의 일주·계절 변화와 자기권 재결합/비대칭에 관한 전역 MHD 연구. 앱의 평면 투영은 이 논문의 MHD 재현이 아님.'},
   windDistance:{title:'Belcher et al. (1993), Solar wind conditions in the outer heliosphere',url:'https://doi.org/10.1029/93JA01178',use:'평균 태양풍 램압의 태양 중심 거리 r^-2 적합과 같은 거리에서도 큰 단기 변동이 존재한다는 근거.'},
+  laic:{title:'Pulinets & Ouzounov (2011), Lithosphere–Atmosphere–Ionosphere Coupling (LAIC) model',url:'https://doi.org/10.1016/j.jseaes.2010.05.009',use:'단층 응력에 따른 라돈/표면 전하 방출과 공기 이온화 가설. 입증된 지진 예측기가 아니며 선택적 가설이다.'},
+  ideTide:{title:'Ide, Yabe, & Fukao (2016), Earthquake potential revealed by tidal influence on earthquake size–frequency statistics',url:'https://doi.org/10.1038/ngeo2808',use:'조석 응력 진폭이 큰 대조기(삭망월)에 한계 응력 단층의 대형 지진 발생 확률 통계. 보편적 단층 예측기가 아님.'},
+  linMagnetopause:{title:'Lin et al. (2010), A three-dimensional asymmetric magnetopause model',url:'https://doi.org/10.1029/2009JA014235',use:'쌍극자 경사각과 태양풍에 따른 3차원 비대칭 자기권계면 및 극지 커스프 함몰 모델.'},
+  wangNitric:{title:'Wang et al. (2020), Rapid growth of new atmospheric particles by nitric acid and ammonia condensation',url:'https://doi.org/10.1038/s41586-020-2270-4',use:'저온 대류권 상층/도시 대기에서 질산–암모니아 공응결에 의한 에어로졸 급속 입자 성장 메커니즘.'},
+  thomasPrecursor:{title:'Thomas, Masci, & Love (2017), On the statistical significance of ionospheric precursors to earthquakes',url:'https://doi.org/10.1093/gji/ggx259',use:'지진 전조 이온층/대기 이상 현상의 통계적 위양성 및 엄격한 대조군 검증의 필요성 근거.'},
 };
+
 
 // Entries group aliases used in controls, formulas, legends and exported diagnostics.
 const item=(terms:string,category:string,evidence:Evidence,explanation:string,limits:string,sources?:string[]):KnowledgeItem=>({terms,category,evidence,explanation,limits,sources});
@@ -100,5 +106,10 @@ export const KNOWLEDGE: KnowledgeItem[] = [
   item('프로브 probe · 우클릭 · 레이어 전체 숨기기 보이기 · fullscreen 줌','표시','표시·수치 기법','선택 위치의 장과 중심 거리를 읽고 개별 표시를 토글한다. 3D 우클릭은 명시된 z=0 단면과 시선의 교점을 측정한다.','3D 화면의 모든 픽셀에 유일한 공간 위치가 존재하는 것은 아니다. 줌과 카메라 회전은 물리량을 바꾸지 않는다.'),
   item('Python 수치 검증 · 대조군 · 차이 Δ · 재현성','검증','표시·수치 기법','현재 입력을 포함한 분석 스크립트를 내보내 같은 조건의 가설/대조군 차이를 확인한다.','코드 테스트 통과는 물리적 가설 입증이 아니다. 극한 입력은 로그 방향 실험이며 일반 수치 내보내기를 중단한다.'),
   item('Gemini API · Worker 프록시 · Turnstile · API key','시스템','표시·수치 기법','외부 AI 설명 서비스, 서버측 API 중계, 봇 방지와 비밀 인증 키를 뜻한다.','AI 답변은 논문 검증을 대체하지 않는다. 키를 소스·브라우저 배포물에 넣지 않는다.'),
-  item('가설 검증 · 상관과 인과 · 관측 fact · 귀무가설 · 민감도','검증','기초 이론','관측·근사·가정을 구분하고, 사전 등록한 시공간 기준과 기상 대조군, 독립 자료로 예측력을 비교한다.','보기 좋은 패턴, 수치적 안정성, 매개변수 조정만으로 지진 예측 가설이 입증되지는 않는다.'),
+  item('가설 검증 · 상관과 인과 · 관측 fact · 귀무가설 · 민감도','검증','기초 이론','관측·근사·가정을 구분하고, 사전 등록한 시공간 기준과 기상 대조군, 독립 자료로 예측력을 비교한다.','보기 좋은 패턴, 수치적 안정성, 매개변수 조정만으로 지진 예측 가설이 입증되지는 않는다.',['thomasPrecursor']),
+  item('태양 조석 · 대조기 · 소조기 · Ide 2016 · 삭망월','달','물리 근사','달(약 4 kPa)과 태양(약 1.83 kPa)의 합성 사중극 기조력. 삭·망(대조기)에 최대 ~5.83 kPa, 상·하현(소조기)에 ~2.17 kPa로 간섭한다.','조석 응력은 가역적이며 판구조 누적 응력과 다르다. 조석만으로 지진을 확정 예측할 수 없다.',['ideTide','tide']),
+  item('LAIC · 라돈 · 지진 이온화 · 표면 전하 · Pulinets 2011','가설','반드시 가설','단층 고응력 시 라돈 방출/표면 전하로 공기 이온쌍 생성률 q가 증가해 에어로졸 핵형성 J_ion을 자극한다는 가설이다.','인과성이 확립되지 않은 연구 가설이다. Thomas et al. (2017)은 대조군 부재와 위양성 위험을 지적했다.',['laic','thomasPrecursor']),
+  item('질산 HNO₃ · 암모니아 급속 성장 · Wang 2020','에어로졸','물리 근사','T < 260 K 저온에서 질산과 암모니아의 공응결이 핵형성 입자를 CCN 크기로 급속 성장시키는 메커니즘이다.','대기 화학 전체의 정밀 상자 모델이 아닌 스크리닝 대리항이다.',['wangNitric']),
+  item('3D 비대칭 자기권계면 · 극지 커스프 함몰 · Lin 2010','우주환경','물리 근사','쌍극자 경사각과 태양풍에 의해 주간 극지 커스프가 안쪽으로 함몰되고 남북 비대칭이 나타나는 3차원 모델이다.','축대칭 Shue 모델의 확장이며 완전한 글로벌 3D MHD 해와 다르다.',['linMagnetopause','shue']),
 ];
+

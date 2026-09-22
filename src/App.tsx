@@ -193,12 +193,21 @@ export default function App() {
       });
       const effective = computeSunEarthCoupling(state.earthOrbitConfig, state.earthConfig, state.solarWind);
       if (!needsLogOnly({ earth:effective.earth, sources:state.sources, solar:effective.solarWind, moon:state.moonConfig })) {
+        stressManager.laicHypothesisEnabled = Boolean(state.cloudConfig.laicCouplingEnabled);
+        stressManager.laicSeismicIonizationScale = state.cloudConfig.laicSeismicIonizationScale ?? 15;
+        const sunAngleRad = (effective.solarWindFlowAngleDeg * Math.PI) / 180;
+        stressManager.update(effective.earth, state.sources, effective.solarWind, dt, handleEarthquakeTriggered, state.moonConfig, sunAngleRad);
+
+        if (state.cloudConfig.aerosolExperiment) {
+          state.cloudConfig.aerosolExperiment.seismicIonizationIncrement = stressManager.seismicIonizationIncrement;
+          state.cloudConfig.seismicIonizationValue = stressManager.seismicIonizationIncrement;
+        }
         particleSystem.update(state.cloudConfig, effective.earth, state.sources, effective.solarWind, dt, now/1000);
-        stressManager.update(effective.earth, state.sources, effective.solarWind, dt, handleEarthquakeTriggered, state.moonConfig);
       }
     }, 100);
     return () => clearInterval(timer);
   }, [particleSystem, stressManager, handleEarthquakeTriggered]);
+
 
   // Preset Scenario Applier
   const handleApplyPreset = (presetKey: string) => {

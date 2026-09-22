@@ -103,13 +103,19 @@ References:
 - [He et al. (2023), iodine oxoacid–sulfuric acid synergy](https://doi.org/10.1126/science.adh2526)
 - [Shen et al. (2024), upper-tropospheric IP-OOM nucleation](https://doi.org/10.1038/s41586-024-08196-0)
 - [CLOUD Collaboration (2026), MSA–sulfuric acid–ammonia nucleation](https://doi.org/10.1038/s41586-026-10810-2)
+- [Wang et al. (2020), nitric acid–ammonia rapid particle growth](https://doi.org/10.1038/s41586-020-2270-4)
 - [Petters and Kreidenweis (2007), κ-Köhler theory](https://doi.org/10.5194/acp-7-1961-2007)
 
 ### Solid-Earth tide and synthetic rupture size
 
-The lunar tide is a reversible quadrupolar perturbation proportional to `d^-3`; it is not accumulated as tectonic stress. Its calibration is bounded at 4 kPa, compared with typical earthquake stress drops of roughly 0.1–10 MPa.
+The baseline lunar tide is a reversible quadrupolar perturbation proportional to `d^-3`; it is not accumulated as tectonic stress. Its calibration is bounded at 4 kPa, compared with typical earthquake stress drops of roughly 0.1–10 MPa (Métivier et al. 2009).
 
-Reference: [Métivier et al. (2009), Earth and Planetary Science Letters](https://doi.org/10.1016/j.epsl.2008.12.024).
+Optionally, the simulator synthesizes solar tidal gravitational force (~1.83 kPa, ~45.8% of lunar tide), reproducing the bi-weekly Spring/Neap modulation (Ide et al., 2016 Nature Geoscience). Syzygy (Spring tide, new/full moon) yields ~5.83 kPa peak amplitude, while quadrature (Neap tide) yields ~2.17 kPa.
+
+References:
+- [Métivier et al. (2009), Earth and Planetary Science Letters](https://doi.org/10.1016/j.epsl.2008.12.024)
+- [Ide, Yabe, & Fukao (2016), Nature Geoscience](https://doi.org/10.1038/ngeo2808)
+- [Lin et al. (2010), 3D asymmetric magnetopause and cusp indentation](https://doi.org/10.1029/2009JA014235)
 
 Synthetic rupture magnitude is obtained from an assumed circular-crack radius and stress drop:
 
@@ -121,7 +127,20 @@ Reference: [Kanamori (1977), JGR](https://doi.org/10.1029/JB082i020p02981). Beca
 
 ## Hypothesis layer
 
+### LAIC pre-seismic radon and ionization coupling
+
+Proposed by Pulinets & Ouzounov (2011) and Freund (2009), the Lithosphere–Atmosphere–Ionosphere Coupling (LAIC) hypothesis suggests that micro-fracturing and stress accumulation release radon and activate electronic charge carriers, increasing the air ionization rate `q`.
+
+The simulator models an optional pre-seismic ionization increment:
+`Delta_q = q_scale * max(0, (failureIndex - 0.70) / (0.85 - 0.70))^2`.
+When `laicCouplingEnabled` is true, this feeds the CERN CLOUD ion-induced channel `J_ion <= (q_base + Delta_q)`. When false, `Delta_q = 0` is the exact null control. Thomas et al. (2017) highlight the necessity of strict null controls against weather-induced false positives.
+
+References:
+- [Pulinets & Ouzounov (2011), Journal of Asian Earth Sciences](https://doi.org/10.1016/j.jseaes.2010.05.009)
+- [Thomas, Masci, & Love (2017), Geophysical Journal International](https://doi.org/10.1093/gji/ggx259)
+
 Raw `|B_E x B_X|` and `|grad B|` cannot be added because they have different dimensions. The simulator now constructs bounded dimensionless terms:
+
 
 - shear: `s = |B_E x B_X|/(|B_E||B_X|)`
 - external ratio: `q = |B_X|/(|B_E|+|B_X|)`
@@ -257,13 +276,19 @@ A useful test must pre-register locations, time windows, cloud-pattern metrics, 
 - [He 외 (2023), 요오드 산소산–황산 상승 작용](https://doi.org/10.1126/science.adh2526)
 - [Shen 외 (2024), 상부 대류권 IP-OOM 핵생성](https://doi.org/10.1038/s41586-024-08196-0)
 - [CLOUD 공동연구진 (2026), MSA–황산–암모니아 핵생성](https://doi.org/10.1038/s41586-026-10810-2)
+- [Wang 외 (2020), 질산–암모니아 급속 입자 성장](https://doi.org/10.1038/s41586-020-2270-4)
 - [Petters와 Kreidenweis (2007), κ-Köhler 이론](https://doi.org/10.5194/acp-7-1961-2007)
 
 ### 고체 지구 조석과 합성 파열 규모
 
-달의 조석은 `d^-3`에 비례하는 가역적인 사중극 섭동이며, 판구조 운동에 의한 응력처럼 누적되지 않습니다. 이 모델의 보정값은 `4 kPa`로 제한되며, 비교 대상인 일반적인 지진의 응력강하는 대략 `0.1–10 MPa`입니다.
+달의 조석은 `d^-3`에 비례하는 가역적인 사중극 섭동이며, 판구조 운동에 의한 응력처럼 누적되지 않습니다. 이 모델의 기준 보정값은 `4 kPa`로 제한되며, 비교 대상인 일반적인 지진의 응력강하는 대략 `0.1–10 MPa`입니다 (Métivier 외 2009).
 
-참고 문헌: [Métivier 외 (2009), Earth and Planetary Science Letters](https://doi.org/10.1016/j.epsl.2008.12.024).
+선택적으로, 시뮬레이터는 태양 기조력(~1.83 kPa, 달 기조력의 약 45.8%)을 합성하여 2주 주기의 대조기(Spring tide)/소조기(Neap tide) 간섭을 모사합니다 (Ide 외 2016 Nature Geoscience). 삭·망 시기에는 최대 ~5.83 kPa, 상·하현 시기에는 ~2.17 kPa의 조석 응력이 나타납니다.
+
+참고 문헌:
+- [Métivier 외 (2009), Earth and Planetary Science Letters](https://doi.org/10.1016/j.epsl.2008.12.024)
+- [Ide, Yabe, & Fukao (2016), Nature Geoscience](https://doi.org/10.1038/ngeo2808)
+- [Lin 외 (2010), 3차원 비대칭 자기권계면 및 커스프 함몰 모델](https://doi.org/10.1029/2009JA014235)
 
 합성 파열 규모는 가정한 원형 균열의 반경과 응력강하로부터 계산합니다.
 
@@ -275,7 +300,20 @@ A useful test must pre-register locations, time windows, cloud-pattern metrics, 
 
 ## 가설 계층 — 반드시 가설
 
+### LAIC 지각–대기 라돈 및 이온화 결합 가설
+
+Pulinets & Ouzounov (2011) 및 Freund (2009)가 제안한 지각-대기-전리층 결합(LAIC) 가설은 단층의 미세 파쇄 및 응력 축적 과정에서 라돈 방출과 암석 전하 캐리어가 활성화되어 대기 이온쌍 생성률 `q`를 증가시킨다고 설명합니다.
+
+시뮬레이터는 선택적 지진 이온화 증분을 모델링합니다:
+`Delta_q = q_scale * max(0, (failureIndex - 0.70) / (0.85 - 0.70))^2`.
+`laicCouplingEnabled`를 켜면 이 증분이 CERN CLOUD 모듈의 이온 유도 핵생성 채널 `J_ion <= (q_base + Delta_q)`에 연동됩니다. 기능을 끄면 `Delta_q = 0`으로 완벽한 무결합 대조군(Null control)을 유지합니다. Thomas 외 (2017)는 기상 요인에 의한 위양성을 걸러내기 위한 엄격한 대조군 검증의 중요성을 강조했습니다.
+
+참고 자료:
+- [Pulinets & Ouzounov (2011), Journal of Asian Earth Sciences](https://doi.org/10.1016/j.jseaes.2010.05.009)
+- [Thomas, Masci, & Love (2017), Geophysical Journal International](https://doi.org/10.1093/gji/ggx259)
+
 `|B_E x B_X|`와 `|grad B|`는 차원이 서로 다르므로 그대로 더할 수 없습니다. 시뮬레이터는 대신 범위가 제한된 무차원 항을 구성합니다.
+
 
 - 방향 전단 지표: `s = |B_E x B_X|/(|B_E||B_X|)`
 - 외부 자기장 비율: `q = |B_X|/(|B_E|+|B_X|)`

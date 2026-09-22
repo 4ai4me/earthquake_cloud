@@ -149,3 +149,51 @@ test('kappa-Kohler activation responds monotonically to hygroscopicity and super
   assert.ok(moreHygroscopic < reference);
   assert.ok(moreSupersaturated < reference);
 });
+
+test('combined solar-lunar tide exhibits spring-neap modulation (Ide et al. 2016)', async () => {
+  const { computeCombinedTidalStressKPa } = await import('../src/physics/physicsCalibration.js');
+  const moonSyzygy = { ...DEFAULT_MOON_CONFIG, phaseAngleDeg: 0, solarTideEnabled: true };
+  const springTide = computeCombinedTidalStressKPa(0, moonSyzygy, 0);
+  assert.ok(Math.abs(springTide - 5.832) < 0.01, `Spring tide expected ~5.83 kPa, got ${springTide}`);
+
+  const neapTide = computeCombinedTidalStressKPa(0, moonSyzygy, Math.PI / 2);
+  assert.ok(Math.abs(neapTide - 2.168) < 0.01, `Neap tide expected ~2.17 kPa, got ${neapTide}`);
+
+  const lunarOnly = computeCombinedTidalStressKPa(0, { ...moonSyzygy, solarTideEnabled: false }, 0);
+  assert.equal(lunarOnly, 4);
+});
+
+test('LAIC crustal ionization coupling produces delta-q only when active and near failure', () => {
+  const manager = new CrustalStressManager(48);
+  manager.laicHypothesisEnabled = false;
+  manager.update(DEFAULT_EARTH_DIPOLE, [], DEFAULT_SOLAR_WIND, 0.1);
+  assert.equal(manager.seismicIonizationIncrement, 0, 'Null control must yield exactly 0');
+
+  manager.laicHypothesisEnabled = true;
+  manager.nodes[0].accumulatedStress = 0.82; // Near failure accumulated stress
+  manager.update(DEFAULT_EARTH_DIPOLE, [], DEFAULT_SOLAR_WIND, 0.01);
+  assert.ok(manager.seismicIonizationIncrement > 0, 'Active LAIC near failure must generate delta-q');
+});
+
+
+test('nitric acid co-condensation enhances aerosol growth at low temperatures (Wang et al. 2020)', () => {
+  const baseColdConfig = { ...CERN_CLOUD_PRESETS.upper_troposphere, nitricAcidPptv: 0, temperatureK: 230 };
+  const baseGrowth = computeCernCloudAerosol(baseColdConfig).growthRateNmH;
+  const nitricColdConfig = { ...CERN_CLOUD_PRESETS.upper_troposphere, nitricAcidPptv: 300, temperatureK: 230 };
+  const enhancedGrowth = computeCernCloudAerosol(nitricColdConfig).growthRateNmH;
+  assert.ok(enhancedGrowth > baseGrowth, `Nitric co-condensation should enhance growth at 230K: ${enhancedGrowth} > ${baseGrowth}`);
+});
+
+test('magnetopause cusp indentation reflects dipole tilt asymmetry (Lin et al. 2010)', async () => {
+  const { magnetopausePoint } = await import('../src/physics/fieldModel.js');
+  const solar = { ...DEFAULT_SOLAR_WIND, enabled: true, pressure: 2, imfBz: 0 };
+  const untiltedContext = { earth: { ...DEFAULT_EARTH_DIPOLE, tiltAngle: 0 }, sources: [], solar };
+  const tiltedContext = { earth: { ...DEFAULT_EARTH_DIPOLE, tiltAngle: 25 }, sources: [], solar };
+
+  const untiltedCusp = magnetopausePoint(0.78, 0, untiltedContext, true);
+  const tiltedCusp = magnetopausePoint(0.78, 0, tiltedContext, true);
+  assert.ok(untiltedCusp !== null && tiltedCusp !== null);
+  // Dipole tilt causes inward indentation on the northern cusp (phi=0)
+  assert.ok(Math.hypot(tiltedCusp.x, tiltedCusp.y) < Math.hypot(untiltedCusp.x, untiltedCusp.y));
+});
+

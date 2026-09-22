@@ -1,6 +1,6 @@
 import { CrustalNode, EarthDipoleConfig, EarthquakeEvent, ExternalMagneticSource, MoonConfig, SolarWindConfig } from '../types';
 import { calculateEarthDipoleField, computeTotalMagneticField } from './magneticEngine';
-import { computeLunarTidalStressKPa, estimateSyntheticRupture } from './physicsCalibration';
+import { computeCombinedTidalStressKPa, computeLunarTidalStressKPa, estimateSyntheticRupture } from './physicsCalibration';
 
 export interface SeismicWave {
   id: string;
@@ -24,8 +24,12 @@ export class CrustalStressManager {
   tectonicLoadingRate: number = 0.0008; // normalized load per displayed second
   magneticHypothesisCouplingMPa: number = 0.01;
   magneticHypothesisEnabled: boolean = true;
+  laicHypothesisEnabled: boolean = false; // Pulinets & Freund LAIC coupling, false by default (null control)
+  laicSeismicIonizationScale: number = 15; // Max delta-q in cm^-3 s^-1
+  seismicIonizationIncrement: number = 0; // Current generated delta-q
   characteristicFailureStressMPa: number = 3;
   ruptureThreshold: number = 0.85; // critical stress threshold
+
 
   constructor(nodeCount: number = 48) {
     this.nodeCount = nodeCount;
@@ -59,7 +63,8 @@ export class CrustalStressManager {
     solarWind: SolarWindConfig,
     dt: number = 0.016,
     onEarthquakeTriggered?: (event: EarthquakeEvent) => void,
-    moonConfig?: MoonConfig
+    moonConfig?: MoonConfig,
+    sunAngleRad: number = 0
   ) {
     let currentMax = 0;
     let maxIdx = 0;
@@ -80,7 +85,7 @@ export class CrustalStressManager {
       node.hypothesisStressMPa = this.magneticHypothesisEnabled
         ? this.magneticHypothesisCouplingMPa * perturbationRatio
         : 0;
-      node.tidalStressKPa = moonConfig ? computeLunarTidalStressKPa(node.angle, moonConfig) : 0;
+      node.tidalStressKPa = moonConfig ? computeCombinedTidalStressKPa(node.angle, moonConfig, sunAngleRad) : 0;
 
       const heterogeneousLoading = this.tectonicLoadingRate * (0.8 + 0.4 * (0.5 + 0.5 * Math.sin(node.id * 1.73)));
       node.accumulatedStress = Math.max(0.02, node.accumulatedStress + heterogeneousLoading * Math.max(0, dt));
@@ -101,6 +106,16 @@ export class CrustalStressManager {
 
     this.maxStressValue = currentMax;
     this.maxStressNodeIndex = maxIdx;
+
+    // Pulinets & Freund LAIC hypothesis: pre-seismic radon & surface charge emission
+    // generates air ionization as crustal stress approaches critical failure.
+    if (this.laicHypothesisEnabled && currentMax >= 0.70) {
+      const excess = Math.min(1, Math.max(0, (currentMax - 0.70) / (this.ruptureThreshold - 0.70)));
+      this.seismicIonizationIncrement = this.laicSeismicIonizationScale * Math.pow(excess, 2);
+    } else {
+      this.seismicIonizationIncrement = 0;
+    }
+
 
     // Update active seismic waves
     for (let i = this.activeWaves.length - 1; i >= 0; i--) {

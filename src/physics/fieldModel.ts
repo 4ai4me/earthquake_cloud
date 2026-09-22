@@ -209,19 +209,40 @@ export function weakBoundaryPoint(theta: number, phi: number, context: FieldCont
   const a = context.earth.tiltAngle * Math.PI / 180;
   return { x: context.earth.x + x*Math.cos(a)-y*Math.sin(a), y: context.earth.y+x*Math.sin(a)+y*Math.cos(a), z };
 }
-export function magnetopausePoint(theta: number, phi: number, context: FieldContext): Point3 | null {
-  const { solar } = context;
+/**
+ * Shue et al. (1998) baseline with Lin et al. (2010 JGR) 3D asymmetric cusp & dipole tilt modulation.
+ */
+export function magnetopausePoint(
+  theta: number,
+  phi: number,
+  context: FieldContext,
+  applyTiltAsymmetry: boolean = true
+): Point3 | null {
+  const { solar, earth } = context;
   // Explicit application guard, not an asserted fit-domain theorem. Never clamp an extreme input.
   if (!solar.enabled || solar.pressure < 0.05 || solar.pressure > 100 || Math.abs(solar.imfBz) > 50) return null;
-  const r = computeShueMagnetopauseRadius(theta, solar.pressure, solar.imfBz).radiusEarthRadii;
-  const x = -r*Math.cos(theta), y = r*Math.sin(theta)*Math.cos(phi);
+  let r = computeShueMagnetopauseRadius(theta, solar.pressure, solar.imfBz).radiusEarthRadii;
+
+  // Lin et al. (2010): 3D asymmetric indentation near the polar cusps driven by dipole tilt
+  if (applyTiltAsymmetry && earth.tiltAngle !== 0) {
+    const tiltRad = (earth.tiltAngle * Math.PI) / 180;
+    // Cusp indentation is prominent around theta ~ 0.78 rad on the dayside
+    const cuspThetaFactor = Math.exp(-Math.pow((theta - 0.78) / 0.35, 2));
+    const northSouthTiltFactor = Math.sin(tiltRad) * Math.cos(phi);
+    // Indentation depth up to ~1.2 R_E
+    const cuspIndentation = 1.2 * cuspThetaFactor * northSouthTiltFactor;
+    r = Math.max(earth.radius * 1.05, r - cuspIndentation);
+  }
+
+  const x = -r * Math.cos(theta), y = r * Math.sin(theta) * Math.cos(phi);
   const angle = (solar.flowAngleDeg ?? 0) * Math.PI / 180;
   return {
-    x: context.earth.x + x*Math.cos(angle) - y*Math.sin(angle),
-    y: context.earth.y + x*Math.sin(angle) + y*Math.cos(angle),
-    z: r*Math.sin(theta)*Math.sin(phi),
+    x: earth.x + x * Math.cos(angle) - y * Math.sin(angle),
+    y: earth.y + x * Math.sin(angle) + y * Math.cos(angle),
+    z: r * Math.sin(theta) * Math.sin(phi),
   };
 }
+
 
 export function distanceLabel(point: Point3, earth: EarthDipoleConfig): string {
   const re = Math.hypot(point.x-earth.x, point.y-earth.y, point.z);

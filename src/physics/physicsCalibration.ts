@@ -5,6 +5,8 @@ export const EARTH_RADIUS_KM = 6_371;
 export const EARTH_EQUATORIAL_FIELD_NT = 31_200;
 export const MEAN_MOON_DISTANCE_EARTH_RADII = 60.3;
 export const MAX_SOLID_EARTH_TIDE_STRESS_KPA = 4;
+export const SOLAR_TIDAL_RATIO = 0.458; // Solar tidal force is ~45.8% of lunar tide
+export const MAX_SOLAR_TIDE_STRESS_KPA = MAX_SOLID_EARTH_TIDE_STRESS_KPA * SOLAR_TIDAL_RATIO; // ~1.83 kPa
 
 /** Proton-only solar-wind ram pressure rho*v^2 in nPa. */
 export function computeSolarWindDynamicPressureNPa(densityCm3: number, speedKmS: number): number {
@@ -56,6 +58,27 @@ export function computeLunarTidalStressKPa(nodeAngleRad: number, moon: MoonConfi
   const calibration = Math.max(0, Math.min(1, moon.tidalStressWeight ?? 1));
   return MAX_SOLID_EARTH_TIDE_STRESS_KPA * calibration * distanceScale * Math.cos(2 * (nodeAngleRad - moonAngle));
 }
+
+/**
+ * Combined lunar and solar tidal stress modulation (Ide et al., 2016 Nature Geoscience).
+ * Synthesizes the ~4.0 kPa lunar tide with the ~1.83 kPa solar tide based on
+ * relative orbital alignment. Syzygy (Spring tide, new/full moon) yields ~5.83 kPa,
+ * while quadrature (Neap tide, half moon) yields ~2.17 kPa.
+ */
+export function computeCombinedTidalStressKPa(
+  nodeAngleRad: number,
+  moon: MoonConfig,
+  sunAngleRad: number = 0
+): number {
+  if (!moon.enabled) return 0;
+  const lunarStress = computeLunarTidalStressKPa(nodeAngleRad, moon);
+  if (moon.solarTideEnabled === false) return lunarStress;
+
+  const calibration = Math.max(0, Math.min(1, moon.tidalStressWeight ?? 1));
+  const solarStress = MAX_SOLAR_TIDE_STRESS_KPA * calibration * Math.cos(2 * (nodeAngleRad - sunAngleRad));
+  return lunarStress + solarStress;
+}
+
 
 /** Circular-crack scaling plus the Hanks-Kanamori moment-magnitude relation. */
 export function estimateSyntheticRupture(

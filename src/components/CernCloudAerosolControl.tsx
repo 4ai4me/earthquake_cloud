@@ -125,6 +125,10 @@ export function CernCloudAerosolControl({ cloudConfig, setCloudConfig }: Props) 
             <input id="cern-dma" type="range" min="0" max="10" step="0.1" value={config.dimethylaminePptv} onChange={(e) => update('dimethylaminePptv', Number(e.target.value))} className="w-full accent-cyan-400" />
           </label>
         </div>
+        <label htmlFor="cern-nitric" className="block space-y-1 rounded-md border border-[#252532] bg-[#101017] p-2.5 text-[11px] text-slate-300">
+          <span className="flex justify-between"><span>질산 HNO₃ (Wang et al. 2020)</span><strong className="font-mono text-cyan-300">{(config.nitricAcidPptv ?? 50).toFixed(0)} pptv</strong></span>
+          <input id="cern-nitric" type="range" min="0" max="500" step="10" value={config.nitricAcidPptv ?? 50} onChange={(e) => update('nitricAcidPptv', Number(e.target.value))} className="w-full accent-cyan-400" />
+        </label>
       </section>
 
       <section className="grid grid-cols-2 gap-2">
@@ -148,6 +152,25 @@ export function CernCloudAerosolControl({ cloudConfig, setCloudConfig }: Props) 
           <span className="flex justify-between"><span>구름 과포화도</span><strong className="font-mono">{config.ccnSupersaturationPercent.toFixed(2)}%</strong></span>
           <input id="cern-ss" type="range" min="0.05" max="1" step="0.05" value={config.ccnSupersaturationPercent} onChange={(e) => update('ccnSupersaturationPercent', Number(e.target.value))} className="w-full accent-emerald-400" />
         </label>
+      </section>
+
+      <section className="rounded-lg border border-amber-500/30 bg-amber-950/20 p-3 space-y-2">
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] font-semibold text-amber-300">반드시 가설: LAIC 지진 이온화 결합 (Pulinets & Freund)</span>
+          <button
+            type="button"
+            onClick={() => setCloudConfig(prev => ({ ...prev, laicCouplingEnabled: !prev.laicCouplingEnabled }))}
+            className={`px-2 py-1 text-[10px] font-semibold rounded border ${cloudConfig.laicCouplingEnabled ? 'bg-amber-500 text-black border-amber-400' : 'bg-[#1a1a24] text-slate-400 border-slate-700'}`}
+          >
+            {cloudConfig.laicCouplingEnabled ? '결합 켜짐 (가설)' : '대조군 (OFF)'}
+          </button>
+        </div>
+        <p className="text-[9px] leading-relaxed text-slate-400">
+          단층 응력이 임계 파열점(Failure Index ≥ 0.70)에 도달할 때 가설적 라돈/표면전하 방출로 대기 이온쌍 생성률(q)이 최대 +{cloudConfig.laicSeismicIonizationScale ?? 15} cm⁻³s⁻¹ 증가합니다.
+          {cloudConfig.laicCouplingEnabled && (
+            <span className="block text-amber-300 font-mono mt-1">현재 실시간 이온화 증분: +{(cloudConfig.seismicIonizationValue ?? 0).toFixed(2)} cm⁻³s⁻¹</span>
+          )}
+        </p>
       </section>
 
       <section aria-live="polite" className="rounded-lg border border-emerald-500/30 bg-emerald-950/15 p-3 space-y-2">
@@ -180,10 +203,13 @@ export function CernCloudAerosolControl({ cloudConfig, setCloudConfig }: Props) 
         <h3 className="flex items-center gap-1.5 font-semibold text-slate-200"><Waves className="h-3.5 w-3.5" />근거 링크</h3>
         <a className="flex items-center gap-1 text-cyan-300 hover:underline" href="https://home.cern/science/experiments/CLOUD/" target="_blank" rel="noreferrer">CERN CLOUD 공식 소개 <ExternalLink className="h-3 w-3" /></a>
         <a className="flex items-center gap-1 text-cyan-300 hover:underline" href="https://doi.org/10.1126/science.aaf2649" target="_blank" rel="noreferrer">Dunne et al. 2016 전지구 핵생성 <ExternalLink className="h-3 w-3" /></a>
+        <a className="flex items-center gap-1 text-cyan-300 hover:underline" href="https://doi.org/10.1038/s41586-020-2270-4" target="_blank" rel="noreferrer">Wang et al. 2020 질산–암모니아 급속 성장 <ExternalLink className="h-3 w-3" /></a>
         <a className="flex items-center gap-1 text-cyan-300 hover:underline" href="https://doi.org/10.1126/science.adh2526" target="_blank" rel="noreferrer">He et al. 2023 HIOx–황산 <ExternalLink className="h-3 w-3" /></a>
         <a className="flex items-center gap-1 text-cyan-300 hover:underline" href="https://doi.org/10.1038/s41586-024-08196-0" target="_blank" rel="noreferrer">Shen et al. 2024 IP‑OOM <ExternalLink className="h-3 w-3" /></a>
         <a className="flex items-center gap-1 text-cyan-300 hover:underline" href="https://doi.org/10.1038/s41586-026-10810-2" target="_blank" rel="noreferrer">CLOUD 2026 MSA–황산–암모니아 <ExternalLink className="h-3 w-3" /></a>
+        <a className="flex items-center gap-1 text-amber-300 hover:underline" href="https://doi.org/10.1016/j.jseaes.2010.05.009" target="_blank" rel="noreferrer">Pulinets & Ouzounov 2011 LAIC 모델 (가설) <ExternalLink className="h-3 w-3" /></a>
       </section>
     </div>
   );
 }
+

@@ -28,12 +28,24 @@ import { DEFAULT_LAYER_VISIBILITY } from './components/VisualElementsGuidePanel'
 import { PhysicsControls } from './components/PhysicsControls';
 import { MathFormulaCard } from './components/MathFormulaCard';
 import { SolarOrbitView } from './components/SolarOrbitView';
+import { ModelessSimulationWindow } from './components/ModelessSimulationWindow';
+import {
+  DEFAULT_WINDOW_LAYOUTS,
+  ModelessSimulationId,
+  ModelessWindowsState,
+  bringWindowToFront,
+  toggleWindowOpen,
+  toggleWindowMinimize,
+  toggleWindowMaximize,
+  closeWindow,
+} from './utils/windowManager';
 import {
   Activity,
   AlertOctagon,
   Box,
   Code,
   Compass,
+  ExternalLink,
   FileCode,
   Flame,
   Globe,
@@ -66,6 +78,44 @@ const createDefaultCloudConfig = (): AtmosphericCloudConfig => ({
 const ViewLoadingFallback = () => (
   <div className="h-full w-full flex items-center justify-center bg-[#09090d] text-xs font-mono text-cyan-300">
     시각화 모듈을 불러오는 중입니다…
+  </div>
+);
+
+const ViewDockedPlaceholder: React.FC<{
+  title: string;
+  icon: React.ReactNode;
+  onDock: () => void;
+  otherViews?: Array<{ label: string; onClick: () => void; color?: string }>;
+}> = ({ title, icon, onDock, otherViews }) => (
+  <div className="h-full w-full flex flex-col items-center justify-center p-6 bg-[#080a12] text-center border border-cyan-900/30 select-none">
+    <div className="p-3 rounded-full bg-[#111628] border border-cyan-500/30 text-cyan-400 mb-3 shadow-lg animate-pulse">
+      {icon}
+    </div>
+    <h3 className="text-sm font-semibold text-slate-100 font-mono">{title}이 비모달 윈도우로 분리되어 표시 중입니다</h3>
+    <p className="text-xs text-slate-400 max-w-md mt-1 mb-4 leading-relaxed font-sans">
+      화면 어디로든 자유롭게 이동하거나 크기를 조절할 수 있으며, 오른쪽 제어 덱에서 파라미터를 실시간으로 조작할 수 있습니다.
+    </p>
+    <div className="flex flex-wrap items-center justify-center gap-2">
+      <button
+        type="button"
+        onClick={onDock}
+        className="px-3 py-1.5 rounded-md bg-cyan-950/90 hover:bg-cyan-900 text-cyan-200 border border-cyan-500/40 text-xs font-mono font-semibold transition-colors shadow-sm flex items-center gap-1.5"
+      >
+        <span>메인 화면으로 도킹 복귀</span>
+      </button>
+      {otherViews?.map((v, i) => (
+        <button
+          key={i}
+          type="button"
+          onClick={v.onClick}
+          className={`px-3 py-1.5 rounded-md bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-700/60 text-xs font-mono transition-colors ${
+            v.color || ''
+          }`}
+        >
+          {v.label}
+        </button>
+      ))}
+    </div>
   </div>
 );
 
@@ -130,6 +180,43 @@ export default function App() {
   const simulationViewportRef = useRef<HTMLDivElement | null>(null);
   const [isViewportFullscreen, setIsViewportFullscreen] = useState(false);
   const [fullscreenError, setFullscreenError] = useState<string | null>(null);
+
+  // 9.1 Modeless Floating Windows State (2D, 3D, Solar Orbit)
+  const [modelessWindows, setModelessWindows] = useState<ModelessWindowsState>({ ...DEFAULT_WINDOW_LAYOUTS });
+
+  const handleToggleModeless = useCallback((id: ModelessSimulationId) => {
+    setModelessWindows((prev) => toggleWindowOpen(prev, id));
+  }, []);
+
+  const handleCloseModeless = useCallback((id: ModelessSimulationId) => {
+    setModelessWindows((prev) => closeWindow(prev, id));
+  }, []);
+
+  const handleFocusModeless = useCallback((id: ModelessSimulationId) => {
+    setModelessWindows((prev) => bringWindowToFront(prev, id));
+  }, []);
+
+  const handleMoveModeless = useCallback((id: ModelessSimulationId, x: number, y: number) => {
+    setModelessWindows((prev) => ({
+      ...prev,
+      [id]: { ...prev[id], x, y },
+    }));
+  }, []);
+
+  const handleResizeModeless = useCallback((id: ModelessSimulationId, width: number, height: number) => {
+    setModelessWindows((prev) => ({
+      ...prev,
+      [id]: { ...prev[id], width, height },
+    }));
+  }, []);
+
+  const handleToggleMinimize = useCallback((id: ModelessSimulationId) => {
+    setModelessWindows((prev) => toggleWindowMinimize(prev, id));
+  }, []);
+
+  const handleToggleMaximize = useCallback((id: ModelessSimulationId) => {
+    setModelessWindows((prev) => toggleWindowMaximize(prev, id));
+  }, []);
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -507,6 +594,58 @@ export default function App() {
             </button>
           </div>
 
+          {/* Modeless Floating Windows Switcher */}
+          <div className="flex items-center p-0.5 bg-[#0a0a0e] rounded-md border border-[#1e1e24] text-xs font-medium">
+            <span className="hidden 2xl:inline text-[10px] font-mono text-slate-400 px-1.5 select-none">
+              비모달 창:
+            </span>
+            <button
+              id="modeless-toggle-2d"
+              type="button"
+              onClick={() => handleToggleModeless('2d')}
+              title={modelessWindows['2d'].isOpen ? '2D 벡터장 비모달 창 도킹 복귀' : '2D 벡터장을 독립 비모달 창으로 분리'}
+              aria-pressed={modelessWindows['2d'].isOpen}
+              className={`px-2 py-1 rounded transition-colors flex items-center gap-1 text-xs ${
+                modelessWindows['2d'].isOpen
+                  ? 'bg-cyan-950/80 text-cyan-300 border border-cyan-500/50 shadow-sm font-semibold'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5 text-cyan-400" />
+              <span>2D 창 ↗</span>
+            </button>
+            <button
+              id="modeless-toggle-3d"
+              type="button"
+              onClick={() => handleToggleModeless('3d')}
+              title={modelessWindows['3d'].isOpen ? '3D 자기권 비모달 창 도킹 복귀' : '3D 자기권을 독립 비모달 창으로 분리'}
+              aria-pressed={modelessWindows['3d'].isOpen}
+              className={`px-2 py-1 rounded transition-colors flex items-center gap-1 text-xs ${
+                modelessWindows['3d'].isOpen
+                  ? 'bg-cyan-950/80 text-cyan-300 border border-cyan-500/50 shadow-sm font-semibold'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Box className="w-3.5 h-3.5 text-cyan-400" />
+              <span>3D 창 ↗</span>
+            </button>
+            <button
+              id="modeless-toggle-orbit"
+              type="button"
+              onClick={() => handleToggleModeless('orbit')}
+              title={modelessWindows['orbit'].isOpen ? '태양 공전 비모달 창 도킹 복귀' : '태양 공전을 독립 비모달 창으로 분리'}
+              aria-pressed={modelessWindows['orbit'].isOpen}
+              className={`px-2 py-1 rounded transition-colors flex items-center gap-1 text-xs ${
+                modelessWindows['orbit'].isOpen
+                  ? 'bg-amber-950/80 text-amber-300 border border-amber-500/50 shadow-sm font-semibold'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Orbit className="w-3.5 h-3.5 text-amber-400" />
+              <span>공전 창 ↗</span>
+            </button>
+          </div>
+
           {/* Python Verification Exporter Button */}
           <button
             id="btn-open-python-modal"
@@ -534,53 +673,41 @@ export default function App() {
                 : 'h-[540px] md:h-[620px] lg:h-[calc(100vh-5.5rem)] lg:min-h-[32rem] lg:max-h-[620px] rounded-lg border border-[#1e1e24]'
             }`}
           >
+            {/* Quick Pop-out Button for Current View Mode */}
+            <button
+              id="btn-popout-current-view"
+              type="button"
+              onClick={() => {
+                if (viewMode === '2D') handleToggleModeless('2d');
+                else if (viewMode === '3D') handleToggleModeless('3d');
+                else if (viewMode === 'orbit') handleToggleModeless('orbit');
+                else if (viewMode === 'split') {
+                  if (!modelessWindows['2d'].isOpen) handleToggleModeless('2d');
+                  else handleToggleModeless('3d');
+                }
+              }}
+              title="현재 시뮬레이션 화면을 독립 비모달 창으로 분리"
+              className="absolute top-3 right-3 z-30 flex items-center gap-1.5 rounded-md border border-cyan-500/40 bg-[#0b1118]/90 px-2.5 py-1 text-[11px] font-mono font-semibold text-cyan-200 shadow-xl backdrop-blur-md transition-all hover:bg-cyan-950 hover:text-cyan-100 hover:border-cyan-400"
+            >
+              <ExternalLink className="h-3.5 w-3.5 text-cyan-400" />
+              <span className="hidden sm:inline">비모달 창 분리</span>
+            </button>
+
             {viewMode === '2D' && (
-              <SimulationCanvas2D
-                research={research} isPlaying={isPlaying} setIsPlaying={setIsPlaying}
-                key={`${cloudConfig.perspectiveMode ?? 'space_global'}:${cloudConfig.inspectionMode === 'split_3view' ? 'split' : 'canvas'}`}
-                earthConfig={effectiveEarthConfig}
-                setEarthConfig={setEarthConfig}
-                sources={sources}
-                setSources={setSources}
-                solarWind={effectiveSolarWind}
-                setSolarWind={setSolarWind}
-                moonConfig={moonConfig}
-                setMoonConfig={setMoonConfig}
-                cloudConfig={cloudConfig}
-                setCloudConfig={setCloudConfig}
-                stressManager={stressManager}
-                particleSystem={particleSystem}
-                onEarthquakeTriggered={handleEarthquakeTriggered}
-                renderMode={renderMode}
-                setRenderMode={setRenderMode}
-                heatmapMetric={heatmapMetric}
-                setHeatmapMetric={setHeatmapMetric}
-                showNeutralPoints={showNeutralPoints}
-                setShowNeutralPoints={setShowNeutralPoints}
-                streamlineDensity={streamlineDensity}
-                layerVisibility={layerVisibility}
-                setLayerVisibility={setLayerVisibility}
-              />
-            )}
-
-            {viewMode === '3D' && (
-              <Suspense fallback={<ViewLoadingFallback />}>
-                <Magnetosphere3DView
-                  particleSystem={particleSystem} setLayerVisibility={setLayerVisibility}
-                  research={research} moonConfig={moonConfig} isPlaying={isPlaying} setIsPlaying={setIsPlaying} layerVisibility={layerVisibility}
-                  earthConfig={effectiveEarthConfig}
-                  sources={sources}
-                  solarWind={effectiveSolarWind}
-                  cloudConfig={cloudConfig}
+              modelessWindows['2d'].isOpen ? (
+                <ViewDockedPlaceholder
+                  title="2D 벡터장"
+                  icon={<Layers className="w-8 h-8 text-cyan-400" />}
+                  onDock={() => handleCloseModeless('2d')}
+                  otherViews={[
+                    { label: '3D 자기권 보기', onClick: () => setViewMode('3D') },
+                    { label: '태양 공전 보기', onClick: () => { setViewMode('orbit'); setActiveControlTab('orbit'); }, color: 'text-amber-300 border-amber-900/50' },
+                  ]}
                 />
-              </Suspense>
-            )}
-
-            {viewMode === 'split' && (
-              <div className="grid grid-cols-2 gap-2 h-full bg-[#0a0a0c]">
+              ) : (
                 <SimulationCanvas2D
                   research={research} isPlaying={isPlaying} setIsPlaying={setIsPlaying}
-                  key={`split:${cloudConfig.perspectiveMode ?? 'space_global'}:${cloudConfig.inspectionMode === 'split_3view' ? 'split' : 'canvas'}`}
+                  key={`${cloudConfig.perspectiveMode ?? 'space_global'}:${cloudConfig.inspectionMode === 'split_3view' ? 'split' : 'canvas'}`}
                   earthConfig={effectiveEarthConfig}
                   setEarthConfig={setEarthConfig}
                   sources={sources}
@@ -604,6 +731,21 @@ export default function App() {
                   layerVisibility={layerVisibility}
                   setLayerVisibility={setLayerVisibility}
                 />
+              )
+            )}
+
+            {viewMode === '3D' && (
+              modelessWindows['3d'].isOpen ? (
+                <ViewDockedPlaceholder
+                  title="3D 자기권"
+                  icon={<Box className="w-8 h-8 text-cyan-400" />}
+                  onDock={() => handleCloseModeless('3d')}
+                  otherViews={[
+                    { label: '2D 벡터장 보기', onClick: () => setViewMode('2D') },
+                    { label: '태양 공전 보기', onClick: () => { setViewMode('orbit'); setActiveControlTab('orbit'); }, color: 'text-amber-300 border-amber-900/50' },
+                  ]}
+                />
+              ) : (
                 <Suspense fallback={<ViewLoadingFallback />}>
                   <Magnetosphere3DView
                     particleSystem={particleSystem} setLayerVisibility={setLayerVisibility}
@@ -614,59 +756,140 @@ export default function App() {
                     cloudConfig={cloudConfig}
                   />
                 </Suspense>
+              )
+            )}
+
+            {viewMode === 'split' && (
+              <div className="grid grid-cols-2 gap-2 h-full bg-[#0a0a0c]">
+                {modelessWindows['2d'].isOpen ? (
+                  <ViewDockedPlaceholder
+                    title="2D 벡터장"
+                    icon={<Layers className="w-6 h-6 text-cyan-400" />}
+                    onDock={() => handleCloseModeless('2d')}
+                  />
+                ) : (
+                  <SimulationCanvas2D
+                    research={research} isPlaying={isPlaying} setIsPlaying={setIsPlaying}
+                    key={`split:${cloudConfig.perspectiveMode ?? 'space_global'}:${cloudConfig.inspectionMode === 'split_3view' ? 'split' : 'canvas'}`}
+                    earthConfig={effectiveEarthConfig}
+                    setEarthConfig={setEarthConfig}
+                    sources={sources}
+                    setSources={setSources}
+                    solarWind={effectiveSolarWind}
+                    setSolarWind={setSolarWind}
+                    moonConfig={moonConfig}
+                    setMoonConfig={setMoonConfig}
+                    cloudConfig={cloudConfig}
+                    setCloudConfig={setCloudConfig}
+                    stressManager={stressManager}
+                    particleSystem={particleSystem}
+                    onEarthquakeTriggered={handleEarthquakeTriggered}
+                    renderMode={renderMode}
+                    setRenderMode={setRenderMode}
+                    heatmapMetric={heatmapMetric}
+                    setHeatmapMetric={setHeatmapMetric}
+                    showNeutralPoints={showNeutralPoints}
+                    setShowNeutralPoints={setShowNeutralPoints}
+                    streamlineDensity={streamlineDensity}
+                    layerVisibility={layerVisibility}
+                    setLayerVisibility={setLayerVisibility}
+                  />
+                )}
+                {modelessWindows['3d'].isOpen ? (
+                  <ViewDockedPlaceholder
+                    title="3D 자기권"
+                    icon={<Box className="w-6 h-6 text-cyan-400" />}
+                    onDock={() => handleCloseModeless('3d')}
+                  />
+                ) : (
+                  <Suspense fallback={<ViewLoadingFallback />}>
+                    <Magnetosphere3DView
+                      particleSystem={particleSystem} setLayerVisibility={setLayerVisibility}
+                      research={research} moonConfig={moonConfig} isPlaying={isPlaying} setIsPlaying={setIsPlaying} layerVisibility={layerVisibility}
+                      earthConfig={effectiveEarthConfig}
+                      sources={sources}
+                      solarWind={effectiveSolarWind}
+                      cloudConfig={cloudConfig}
+                    />
+                  </Suspense>
+                )}
               </div>
             )}
 
             {viewMode === 'orbit' && (
               <div className="grid h-full grid-rows-[42%_58%] gap-1 bg-[#05060a]" data-testid="orbit-combined-view">
                 <section aria-label="태양 중심 공전 패널" className="min-h-0 overflow-hidden border-b border-amber-500/25">
-                  <SolarOrbitView config={earthOrbitConfig} earthConfig={earthConfig} solarWind={solarWind} isPlaying={isPlaying} setIsPlaying={setIsPlaying} />
+                  {modelessWindows['orbit'].isOpen ? (
+                    <ViewDockedPlaceholder
+                      title="태양 공전"
+                      icon={<Orbit className="w-6 h-6 text-amber-400" />}
+                      onDock={() => handleCloseModeless('orbit')}
+                    />
+                  ) : (
+                    <SolarOrbitView config={earthOrbitConfig} earthConfig={earthConfig} solarWind={solarWind} isPlaying={isPlaying} setIsPlaying={setIsPlaying} />
+                  )}
                 </section>
                 <div className="grid min-h-0 grid-cols-2 gap-1">
                   <section aria-label="태양 공전 모드 2D 벡터장" className="flex min-w-0 flex-col overflow-hidden border-r border-cyan-500/20" data-testid="orbit-panel-2d">
                     <div className="shrink-0 border-b border-cyan-900/60 bg-slate-950 px-2 py-1 text-[10px] font-mono font-semibold text-cyan-300">자전·공전 연동 · 2D · 태양풍 {renderCoupling.solarWindFlowAngleDeg.toFixed(0)}° · 쌍극 {renderCoupling.projectedDipoleAngleDeg.toFixed(1)}°</div>
                     <div className="relative min-h-0 flex-1">
-                      <SimulationCanvas2D
-                        research={research} isPlaying={isPlaying} setIsPlaying={setIsPlaying}
-                        key={`orbit:${cloudConfig.perspectiveMode ?? 'space_global'}:${cloudConfig.inspectionMode === 'split_3view' ? 'split' : 'canvas'}`}
-                        earthConfig={effectiveEarthConfig}
-                        setEarthConfig={setEarthConfig}
-                        sources={sources}
-                        setSources={setSources}
-                        solarWind={effectiveSolarWind}
-                        setSolarWind={setSolarWind}
-                        moonConfig={moonConfig}
-                        setMoonConfig={setMoonConfig}
-                        cloudConfig={cloudConfig}
-                        setCloudConfig={setCloudConfig}
-                        stressManager={stressManager}
-                        particleSystem={particleSystem}
-                        onEarthquakeTriggered={handleEarthquakeTriggered}
-                        renderMode={renderMode}
-                        setRenderMode={setRenderMode}
-                        heatmapMetric={heatmapMetric}
-                        setHeatmapMetric={setHeatmapMetric}
-                        showNeutralPoints={showNeutralPoints}
-                        setShowNeutralPoints={setShowNeutralPoints}
-                        streamlineDensity={streamlineDensity}
-                        layerVisibility={layerVisibility}
-                        setLayerVisibility={setLayerVisibility}
-                      />
+                      {modelessWindows['2d'].isOpen ? (
+                        <ViewDockedPlaceholder
+                          title="2D 벡터장"
+                          icon={<Layers className="w-5 h-5 text-cyan-400" />}
+                          onDock={() => handleCloseModeless('2d')}
+                        />
+                      ) : (
+                        <SimulationCanvas2D
+                          research={research} isPlaying={isPlaying} setIsPlaying={setIsPlaying}
+                          key={`orbit:${cloudConfig.perspectiveMode ?? 'space_global'}:${cloudConfig.inspectionMode === 'split_3view' ? 'split' : 'canvas'}`}
+                          earthConfig={effectiveEarthConfig}
+                          setEarthConfig={setEarthConfig}
+                          sources={sources}
+                          setSources={setSources}
+                          solarWind={effectiveSolarWind}
+                          setSolarWind={setSolarWind}
+                          moonConfig={moonConfig}
+                          setMoonConfig={setMoonConfig}
+                          cloudConfig={cloudConfig}
+                          setCloudConfig={setCloudConfig}
+                          stressManager={stressManager}
+                          particleSystem={particleSystem}
+                          onEarthquakeTriggered={handleEarthquakeTriggered}
+                          renderMode={renderMode}
+                          setRenderMode={setRenderMode}
+                          heatmapMetric={heatmapMetric}
+                          setHeatmapMetric={setHeatmapMetric}
+                          showNeutralPoints={showNeutralPoints}
+                          setShowNeutralPoints={setShowNeutralPoints}
+                          streamlineDensity={streamlineDensity}
+                          layerVisibility={layerVisibility}
+                          setLayerVisibility={setLayerVisibility}
+                        />
+                      )}
                     </div>
                   </section>
                   <section aria-label="태양 공전 모드 3D 자기권" className="flex min-w-0 flex-col overflow-hidden" data-testid="orbit-panel-3d">
                     <div className="shrink-0 border-b border-purple-900/60 bg-slate-950 px-2 py-1 text-[10px] font-mono font-semibold text-purple-300">자전·공전 연동 · 3D · 동압 ×{renderCoupling.solarWindPressureRatio.toFixed(4)} · 쌍극 {renderCoupling.projectedDipoleAngleDeg.toFixed(1)}°</div>
                     <div className="relative min-h-0 flex-1">
-                      <Suspense fallback={<ViewLoadingFallback />}>
-                        <Magnetosphere3DView
-                          particleSystem={particleSystem} setLayerVisibility={setLayerVisibility}
-                          research={research} moonConfig={moonConfig} isPlaying={isPlaying} setIsPlaying={setIsPlaying} layerVisibility={layerVisibility}
-                          earthConfig={effectiveEarthConfig}
-                          sources={sources}
-                          solarWind={effectiveSolarWind}
-                          cloudConfig={cloudConfig}
+                      {modelessWindows['3d'].isOpen ? (
+                        <ViewDockedPlaceholder
+                          title="3D 자기권"
+                          icon={<Box className="w-5 h-5 text-cyan-400" />}
+                          onDock={() => handleCloseModeless('3d')}
                         />
-                      </Suspense>
+                      ) : (
+                        <Suspense fallback={<ViewLoadingFallback />}>
+                          <Magnetosphere3DView
+                            particleSystem={particleSystem} setLayerVisibility={setLayerVisibility}
+                            research={research} moonConfig={moonConfig} isPlaying={isPlaying} setIsPlaying={setIsPlaying} layerVisibility={layerVisibility}
+                            earthConfig={effectiveEarthConfig}
+                            sources={sources}
+                            solarWind={effectiveSolarWind}
+                            cloudConfig={cloudConfig}
+                          />
+                        </Suspense>
+                      )}
                     </div>
                   </section>
                 </div>
@@ -769,6 +992,120 @@ export default function App() {
           />
         </Suspense>
       )}
+
+      {/* Modeless Floating Windows (2D, 3D, Solar Orbit) */}
+      <ModelessSimulationWindow
+        id="2d"
+        title="2D 벡터장 시뮬레이션"
+        icon={<Layers className="w-3.5 h-3.5 text-cyan-400" />}
+        isOpen={modelessWindows['2d'].isOpen}
+        isMinimized={modelessWindows['2d'].isMinimized}
+        isMaximized={modelessWindows['2d'].isMaximized}
+        x={modelessWindows['2d'].x}
+        y={modelessWindows['2d'].y}
+        width={modelessWindows['2d'].width}
+        height={modelessWindows['2d'].height}
+        zIndex={modelessWindows['2d'].zIndex}
+        onClose={() => handleCloseModeless('2d')}
+        onToggleMinimize={() => handleToggleMinimize('2d')}
+        onToggleMaximize={() => handleToggleMaximize('2d')}
+        onMove={(x, y) => handleMoveModeless('2d', x, y)}
+        onResize={(w, h) => handleResizeModeless('2d', w, h)}
+        onFocus={() => handleFocusModeless('2d')}
+      >
+        <SimulationCanvas2D
+          research={research}
+          isPlaying={isPlaying}
+          setIsPlaying={setIsPlaying}
+          key={`modeless-2d:${cloudConfig.perspectiveMode ?? 'space_global'}:${cloudConfig.inspectionMode === 'split_3view' ? 'split' : 'canvas'}`}
+          earthConfig={effectiveEarthConfig}
+          setEarthConfig={setEarthConfig}
+          sources={sources}
+          setSources={setSources}
+          solarWind={effectiveSolarWind}
+          setSolarWind={setSolarWind}
+          moonConfig={moonConfig}
+          setMoonConfig={setMoonConfig}
+          cloudConfig={cloudConfig}
+          setCloudConfig={setCloudConfig}
+          stressManager={stressManager}
+          particleSystem={particleSystem}
+          onEarthquakeTriggered={handleEarthquakeTriggered}
+          renderMode={renderMode}
+          setRenderMode={setRenderMode}
+          heatmapMetric={heatmapMetric}
+          setHeatmapMetric={setHeatmapMetric}
+          showNeutralPoints={showNeutralPoints}
+          setShowNeutralPoints={setShowNeutralPoints}
+          streamlineDensity={streamlineDensity}
+          layerVisibility={layerVisibility}
+          setLayerVisibility={setLayerVisibility}
+        />
+      </ModelessSimulationWindow>
+
+      <ModelessSimulationWindow
+        id="3d"
+        title="3D 자기권 시뮬레이션"
+        icon={<Box className="w-3.5 h-3.5 text-cyan-400" />}
+        isOpen={modelessWindows['3d'].isOpen}
+        isMinimized={modelessWindows['3d'].isMinimized}
+        isMaximized={modelessWindows['3d'].isMaximized}
+        x={modelessWindows['3d'].x}
+        y={modelessWindows['3d'].y}
+        width={modelessWindows['3d'].width}
+        height={modelessWindows['3d'].height}
+        zIndex={modelessWindows['3d'].zIndex}
+        onClose={() => handleCloseModeless('3d')}
+        onToggleMinimize={() => handleToggleMinimize('3d')}
+        onToggleMaximize={() => handleToggleMaximize('3d')}
+        onMove={(x, y) => handleMoveModeless('3d', x, y)}
+        onResize={(w, h) => handleResizeModeless('3d', w, h)}
+        onFocus={() => handleFocusModeless('3d')}
+      >
+        <Suspense fallback={<ViewLoadingFallback />}>
+          <Magnetosphere3DView
+            particleSystem={particleSystem}
+            setLayerVisibility={setLayerVisibility}
+            research={research}
+            moonConfig={moonConfig}
+            isPlaying={isPlaying}
+            setIsPlaying={setIsPlaying}
+            layerVisibility={layerVisibility}
+            earthConfig={effectiveEarthConfig}
+            sources={sources}
+            solarWind={effectiveSolarWind}
+            cloudConfig={cloudConfig}
+          />
+        </Suspense>
+      </ModelessSimulationWindow>
+
+      <ModelessSimulationWindow
+        id="orbit"
+        title="태양 공전 궤도 시뮬레이션"
+        icon={<Orbit className="w-3.5 h-3.5 text-amber-400" />}
+        isOpen={modelessWindows['orbit'].isOpen}
+        isMinimized={modelessWindows['orbit'].isMinimized}
+        isMaximized={modelessWindows['orbit'].isMaximized}
+        x={modelessWindows['orbit'].x}
+        y={modelessWindows['orbit'].y}
+        width={modelessWindows['orbit'].width}
+        height={modelessWindows['orbit'].height}
+        zIndex={modelessWindows['orbit'].zIndex}
+        onClose={() => handleCloseModeless('orbit')}
+        onToggleMinimize={() => handleToggleMinimize('orbit')}
+        onToggleMaximize={() => handleToggleMaximize('orbit')}
+        onMove={(x, y) => handleMoveModeless('orbit', x, y)}
+        onResize={(w, h) => handleResizeModeless('orbit', w, h)}
+        onFocus={() => handleFocusModeless('orbit')}
+      >
+        <SolarOrbitView
+          config={earthOrbitConfig}
+          earthConfig={earthConfig}
+          solarWind={solarWind}
+          isPlaying={isPlaying}
+          setIsPlaying={setIsPlaying}
+        />
+      </ModelessSimulationWindow>
     </div>
   );
 }
